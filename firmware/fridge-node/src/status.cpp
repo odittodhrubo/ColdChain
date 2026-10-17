@@ -1,0 +1,24 @@
+#include "status.h"
+
+#include <math.h>
+
+#include "constants.h"
+
+FridgeState classify(float temp, bool door_open, bool on_battery, bool sensor_fault) {
+  if (sensor_fault || isnan(temp) || temp > cc::SAFE_MAX_C || temp < cc::SAFE_MIN_C) return FridgeState::BREACH;
+  if (temp > cc::WARN_HIGH_C || temp < cc::WARN_LOW_C) return FridgeState::WARNING;  // inside 2..8 here
+  if (door_open || on_battery) return FridgeState::WARNING;
+  return FridgeState::SAFE;
+}
+
+const char* stateName(FridgeState s) {
+  switch (s) {
+    case FridgeState::SAFE:
+      return "SAFE";
+    case FridgeState::WARNING:
+      return "WARNING";
+    case FridgeState::BREACH:
+      return "BREACH";
+  }
+  return "BREACH";
+}

@@ -1,0 +1,43 @@
+// Debounced inputs: door switch, power-fail button, Wi-Fi-outage button, mode switch.
+// Debouncer is pure (native-tested); the rest reads the GPIOs from pins.h.
+#pragma once
+#include <stdint.h>
+
+#include "node_config.h"
+
+// A raw level must stay unchanged for DEBOUNCE_MS before it is accepted (switch bounce measured in P01 is < 5 ms).
+class Debouncer {
+ public:
+  void reset(bool level) { stable_ = candidate_ = level; }
+  // Returns true when the debounced level changes.
+  bool update(bool raw, uint32_t now_ms) {
+    if (raw != candidate_) {
+      candidate_ = raw;
+      since_ms_ = now_ms;
+    } else if (candidate_ != stable_ && now_ms - since_ms_ >= cfg::DEBOUNCE_MS) {
+      stable_ = candidate_;
+      return true;
+    }
+    return false;
+  }
+  bool level() const { return stable_; }
+
+ private:
+  bool stable_ = false;
+  bool candidate_ = false;
+  uint32_t since_ms_ = 0;
+};
+
+struct InputEvents {
+  bool doorChanged = false;
+  bool modeChanged = false;
+  bool powerPressed = false;  // button press edges; P05 turns these into MAINS/BATTERY and Wi-Fi outage toggles
+  bool wifiPressed = false;
+};
+
+namespace inputs {
+void begin();
+InputEvents poll(uint32_t now_ms);
+bool doorOpen();
+bool manualMode();  // mode switch ON = manual DS18B20, OFF = thermal model
+}  // namespace inputs
