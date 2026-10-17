@@ -1,0 +1,59 @@
+# Dev stack: `make up` (or `npm run up`) from the repo root. Requires ../.env (`npm run env:init`).
+# Wokwi nodes cannot reach this local broker; they use the cloud broker in MQTT_URL.
+# Local Mosquitto serves the virtual node and tests: set MQTT_URL=mqtt://mosquitto:1883 in .env to use it.
+name: coldchain
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - '1883:1883'
+    volumes:
+      - ./mosquitto:/mosquitto/config-src:ro
+    # mosquitto 2 needs a hashed password file; hash the dev-only plaintext copy at start.
+    command: >
+      sh -c "cp /mosquitto/config-src/passwd.dev /mosquitto/config/passwd &&
+             mosquitto_passwd -U /mosquitto/config/passwd &&
+             chown mosquitto:mosquitto /mosquitto/config/passwd && chmod 0700 /mosquitto/config/passwd &&
+             exec mosquitto -c /mosquitto/config-src/mosquitto.conf"
+
+  backend:
+    build: ../backend
+    env_file: ../.env
+    environment:
+      ML_URL: http://ml:8000
+    ports:
+      - '4000:4000'
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+      - ../contracts:/contracts:ro
+    depends_on:
+      - mosquitto
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      retries: 5
+
+  ml:
+    build: ../ml
+    ports:
+      - '8000:8000'
+    volumes:
+      - ../ml:/app
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      retries: 5
+
+  frontend:
+    build: ../frontend
+    environment:
+      VITE_PROXY_TARGET: http://backend:4000
+    ports:
+      - '5173:5173'
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend

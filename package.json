@@ -1,0 +1,21 @@
+{
+  "name": "coldchain",
+  "private": true,
+  "description": "ColdChain: vaccine & medicine storage monitor (FastRoboX 1.0 IoT hackathon)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "env:init": "node tools/init_env.js",
+    "gen": "python tools/gen_constants.py && node tools/gen_vectors.js",
+    "check:gen": "python tools/gen_constants.py --check && node tools/gen_vectors.js --check",
+    "test": "node tools/test_all.js",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint && ruff check ml tools",
+    "format": "npm --prefix backend run format && npm --prefix frontend run format && ruff format ml tools",
+    "up": "docker compose -f infra/docker-compose.yml up -d --build",
+    "down": "docker compose -f infra/docker-compose.yml down",
+    "seed": "npm --prefix backend run seed",
+    "demo": "npm --prefix backend run demo"
+  }
+}
