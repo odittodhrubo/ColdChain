@@ -79,7 +79,7 @@ python -m coldchain_tools.tamper --reading-id 120 --field temp --value 4.0
 python -m coldchain_tools.tamper --restore                              # undo all edits, newest first
 ```
 
-The database defaults to the backend's `DB_PATH`. The originals are kept in `<db>.tamper.json`. Column names are checked against the table's real columns (`id` cannot be edited), and the tool refuses to run when `NODE_ENV=production`.
+The database defaults to the backend's `DB_PATH`. The originals are kept in `<db>.tamper.json`. Column names are checked against the table's real columns (`id` cannot be edited), and the tool refuses to run when `NODE_ENV=production`. `audit_log` is append-only at the database level: like an attacker with direct file access, the tool drops the two triggers for its edit and recreates them, and Verify Integrity still reports the change (`HASH_MISMATCH` at that id; `READINGS_TAMPERED` for a reading covered by a checkpoint).
 
 ## Verify an envelope
 

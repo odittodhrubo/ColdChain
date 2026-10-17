@@ -6,6 +6,10 @@
 
 The original values are kept in <db>.tamper.json next to the database. Without --value, text gets a visible
 marker appended and numbers are changed by +1. Refuses to run when NODE_ENV=production.
+
+audit_log is append-only at the database level (BEFORE UPDATE/DELETE triggers). Like an attacker with direct
+file access, the tool drops those triggers for its edit and recreates them. That is defence in depth: the
+triggers stop accidents and ordinary SQL, and the hash chain still catches someone who bypasses them.
 """
 
 from __future__ import annotations
@@ -36,6 +40,18 @@ def columns(con: sqlite3.Connection, table: str) -> list[str]:
     ]  # table is from TABLES, never user input
 
 
+def write_cell(con: sqlite3.Connection, table: str, field: str, value, row_id: int) -> None:
+    """UPDATE one cell, temporarily removing the table's triggers (the audit log's append-only guard)."""
+    triggers = con.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", (table,)
+    ).fetchall()
+    for name, _ in triggers:
+        con.execute(f'DROP TRIGGER "{name}"')
+    con.execute(f'UPDATE {table} SET "{field}" = ? WHERE id = ?', (value, row_id))
+    for _, sql in triggers:
+        con.execute(sql)
+
+
 def tampered(old):
     if isinstance(old, (int, float)) and not isinstance(old, bool):
         return old + 1
@@ -55,7 +71,7 @@ def tamper(db: Path, table: str, row_id: int, field: str, value=None) -> tuple[o
             raise SystemExit(f"{table} has no row with id {row_id}")
         old = row[0]
         new = tampered(old) if value is None else value
-        con.execute(f'UPDATE {table} SET "{field}" = ? WHERE id = ?', (new, row_id))
+        write_cell(con, table, field, new, row_id)
     log = json.loads(backup_path(db).read_text()) if backup_path(db).exists() else []
     log.append({"table": table, "id": row_id, "field": field, "old": old})
     backup_path(db).write_text(json.dumps(log, indent=2))
@@ -72,10 +88,7 @@ def restore(db: Path) -> int:
         for entry in reversed(log):
             if entry["field"] not in columns(con, entry["table"]) or entry["table"] not in TABLES.values():
                 raise SystemExit(f"backup entry does not match the schema: {entry}")
-            con.execute(
-                f'UPDATE {entry["table"]} SET "{entry["field"]}" = ? WHERE id = ?',
-                (entry["old"], entry["id"]),
-            )
+            write_cell(con, entry["table"], entry["field"], entry["old"], entry["id"])
     path.unlink()
     return len(log)
 

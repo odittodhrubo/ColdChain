@@ -2,6 +2,7 @@ import type { Request, RequestHandler, Response, Router } from 'express';
 import { z, type ZodType } from 'zod';
 import type { Config } from '../config';
 import type { Db } from '../db';
+import type { AuditLog } from '../modules/audit/service';
 import { can, type Permission, type Role } from '../rbac/permissions';
 import { forbidden, unauthenticated } from './errors';
 
@@ -29,6 +30,7 @@ declare module 'express-serve-static-core' {
 export interface AppContext {
   db: Db;
   config: Config;
+  audit: AuditLog;
 }
 
 type Method = 'get' | 'post' | 'patch' | 'put' | 'delete';

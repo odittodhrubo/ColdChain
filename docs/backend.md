@@ -14,7 +14,7 @@ src/
   scripts/seed.ts       npm run seed
 ```
 
-`realtime/`, `mqtt/`, `ml/` and `jobs/` are added by the prompts that need them (P09 onwards).
+`jobs/` runs background work (token purge, audit anchors, reject coalescing). `realtime/`, `mqtt/` and `ml/` are added by the prompts that need them (P09 onwards).
 
 ## Requests and errors
 
@@ -66,6 +66,43 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 
 **Device secrets** are stored encrypted with AES-256-GCM under `APP_SECRET_KEY` (`v1:<iv>:<tag>:<ciphertext>`). The GCM tag makes a modified value fail to decrypt rather than yield a wrong secret.
 
+## Tamper-evident audit log
+
+`src/modules/audit`. Table `audit_log`: `id` (autoincrement), `ts` (unix ms), `actor` (`user:<id>`, `device:<id>` or `system`), `event_type`, `payload` (canonical JSON text), `prev_hash`, `hash`.
+
+- **Hash rule:** `hash = SHA256(prev_hash | id | ts | actor | event_type | payload)`, and the genesis `prev_hash` is 64 zeros. Every row commits to the one before it.
+- **Canonical JSON** (`canonical.ts`), used for both writing and verifying: keys sorted recursively, no whitespace, numbers in their shortest round-trip form (`5.0` → `5`, `-0` → `0`), `undefined` members dropped, non-finite numbers and non-plain objects refused.
+- **Append:** `appendEntries` runs in one `BEGIN IMMEDIATE` transaction. It takes the write lock *before* reading the head, so two writers, even in different processes, can never extend the same head and fork the chain. `AuditLog.enqueue` is a bounded async queue (1000; overflow is counted and logged) written in one transaction per tick for high-rate callers.
+- **Event types:** `AUTH_LOGIN`, `AUTH_FAIL`, `USER_CREATED/UPDATED/DISABLED`, `BATCH_CREATED/UPDATED/MOVED`, `BATCH_STATUS_CHANGED`, `LATCH_RESET`, `DISCARD_ACK`, `ALERT_RAISED/ACKED`, `SECURITY_REJECT`, `RELOCATION_PROPOSED/CONFIRMED/DISMISSED`, `DEVICE_EVENT`, `BREACH_START/END`, `TELEMETRY_CHECKPOINT`, `AUDIT_VERIFY`. Logins, login failures (email, reason, IP; never the password) and user changes (changed field names; never the password) are logged now; the others are written by the modules that own them.
+- **SECURITY_REJECT coalescing:** `AuditLog.securityReject(device, reason)` keeps one window per device + reason. Each minute it writes **one** entry `{device_id, reason, count, first_ts, last_ts}`, so a flood of forged messages cannot bloat the chain. The per-message detail goes to `security_events` (P09).
+- **Telemetry checkpoints:** `checkpointReadings(db, fridgeId)` writes a `TELEMETRY_CHECKPOINT` for every full block of 100 readings of a fridge: `{fridge_id, from_id, to_id, from_seq, to_seq, count, sha256}`, where `sha256` covers the canonical JSON of those `readings` rows in id order. Blocks are ranges of reading **row ids**, not seqs: synced (late) readings always get new ids, so they never fall inside an already-checkpointed range and cannot cause false alarms. Editing or deleting a covered reading breaks verification.
+- **Immutability:** `BEFORE UPDATE` / `BEFORE DELETE` triggers on `audit_log` raise `audit_log is append-only`. The P06 `tamper` tool drops and recreates them to demonstrate detection. That is defence in depth: the triggers stop accidents and ordinary SQL, and the chain catches someone who bypasses them.
+
+### Verify Integrity
+
+`GET /api/audit/verify[?from=<id>][&stream=1]` (permission `audit:verify`) recomputes the chain in chunks of 5000 rows and yields to the event loop between chunks, so 100 000 rows take well under 3 s and the API stays responsive. Each row is checked in this order:
+
+| Reason | Meaning |
+|---|---|
+| `ID_GAP` | a row is missing (deleted); `firstBrokenId` is the first row after the gap |
+| `GENESIS_INVALID` | row 1 does not start from 64 zeros |
+| `PREV_LINK_BROKEN` | `prev_hash` is not the previous row's hash (inserted or reordered rows) |
+| `HASH_MISMATCH` | the row's content or hash was changed (payload, ts, actor, ...) |
+| `ANCHOR_MISMATCH` | a recorded anchor head is missing or different (deleted tail, or a fully recomputed chain) |
+| `READINGS_TAMPERED` | a `TELEMETRY_CHECKPOINT` no longer matches the stored readings |
+
+The response is `{valid, checked, headId, headHash, checkpoints, anchors, firstBrokenId?, reason?, expected?, actual?}`. `?from=id` verifies from that row, trusting the row before it. `?stream=1` returns NDJSON: `{"progress":{checked,total}}` lines, then `{"result":…}`. The call itself is logged as `AUDIT_VERIFY` *after* the check, so recording a verification never changes its own result.
+
+### Anchoring
+
+Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, `count`) in `audit_anchor` and sends it to Telegram (when `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are set) and to the log. A deleted *last* row leaves every remaining link valid; only a head recorded earlier reveals it, and the tests cover exactly this case.
+
+**What the chain does and does not prove.** It proves *integrity*: any change to recorded history is detected. It does not prove *who* wrote a row. An attacker with full write access to the database file could delete everything and recompute a consistent chain from scratch. The off-box anchors make that detectable, because the old head no longer matches. Without external anchoring it would not be. A documented extension is an HMAC of each row under a key kept outside the database.
+
+### Read API
+
+`GET /api/audit?type&actor&from&to&page&pageSize` (permission `audit:read`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
+
 ## Seed
 
 ```bash
@@ -88,4 +125,5 @@ The dev image (Node 20) installs `python3 make g++`, because `better-sqlite3` ha
 | `db.test.ts` | all tables, migrations idempotent, unique keys and indexes, foreign keys, AES-GCM round trip / tamper / wrong key |
 | `auth.test.ts` | login, identical error + bcrypt run for unknown email, disabled account, lockout after 5 and unlock, per-IP rate limit, `$2b$12$` hashes, logout revocation, expired / tampered / wrong-key / `alg:none` tokens, demotion and disabling take effect at once |
 | `rbac.test.ts` | every registered route × Admin / Pharmacist / Inspector / anonymous, plus the matrix itself |
+| `audit.test.ts` | canonical JSON edge cases, genesis and links, clean / empty log, triggers, each tamper case with its reason and record id (edited payload, edited hash, changed ts, deleted row, deleted first row, row inserted in the middle, swapped rows, replaced genesis), deleted tail caught by the anchor, recomputed chain caught by the anchor, partial `?from`, 100 parallel appends and two connections → one valid chain, 100k rows < 3 s without blocking, checkpoints (late rows, edited and deleted readings), reject coalescing, bounded queue, API (logins, failures, user changes, pagination, verify, NDJSON stream) |
 | `users.test.ts` | create (no hash leaked), duplicate email, weak passwords, unknown fields rejected, role change, password reset, disable, last-admin protection, seed (3 users, 2 fridges, 2 devices, encrypted secrets, idempotent) |

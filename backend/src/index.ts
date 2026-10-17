@@ -1,15 +1,27 @@
 import { createApp } from './app';
-import { purgeRevoked } from './auth/tokens';
-import { loadEnvOrExit } from './env';
 import { openDb } from './db';
+import { loadEnvOrExit } from './env';
+import { startJobs } from './jobs';
+import type { AppContext } from './shared/http';
 import { logger } from './shared/logger';
 
 const config = loadEnvOrExit();
 const db = openDb(config.DB_PATH);
+const app = createApp(config, db);
+const ctx = app.locals.ctx as AppContext;
+const stopJobs = startJobs(ctx);
 
-// Housekeeping: revoked tokens are only needed until they would have expired anyway.
-setInterval(() => purgeRevoked(db), 10 * 60_000).unref();
-
-createApp(config, db).listen(config.PORT, () => {
+const server = app.listen(config.PORT, () => {
   logger.info(`backend listening on http://localhost:${config.PORT} (${config.NODE_ENV})`);
 });
+
+function shutdown(signal: string) {
+  logger.info({ signal }, 'shutting down');
+  stopJobs(); // writes pending audit entries before the process exits
+  server.close(() => {
+    db.close();
+    process.exit(0);
+  });
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

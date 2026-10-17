@@ -44,7 +44,7 @@ export function authRoutes(): RouteDef[] {
       access: 'public',
       middleware: [loginLimiter],
       body: z.strictObject({ email: z.email().max(254), password: z.string().min(1).max(200) }),
-      async handler({ body }, { db, config }) {
+      async handler({ body, req }, { db, config, audit }) {
         const now = Date.now();
         const email = body.email.toLowerCase();
         const attempt = db
@@ -52,6 +52,7 @@ export function authRoutes(): RouteDef[] {
           .get(email) as { failures: number; locked_until: number } | undefined;
         if (attempt && attempt.locked_until > now) {
           const retry = Math.ceil((attempt.locked_until - now) / 1000);
+          audit.append('system', 'AUTH_FAIL', { email, reason: 'LOCKED', ip: req.ip });
           throw new HttpError(429, 'ACCOUNT_LOCKED', `Too many failed attempts, try again in ${retry} s`, {
             retryAfterS: retry,
           });
@@ -75,10 +76,12 @@ export function authRoutes(): RouteDef[] {
             `INSERT INTO login_attempts (email, failures, locked_until) VALUES (?, ?, ?)
              ON CONFLICT(email) DO UPDATE SET failures = excluded.failures, locked_until = excluded.locked_until`,
           ).run(email, failures, lockedUntil);
+          audit.append('system', 'AUTH_FAIL', { email, reason: 'BAD_CREDENTIALS', failures, ip: req.ip });
           throw unauthenticated(GENERIC, 'INVALID_CREDENTIALS');
         }
 
         db.prepare('DELETE FROM login_attempts WHERE email = ?').run(email);
+        audit.append(`user:${user.id}`, 'AUTH_LOGIN', { user_id: user.id, email, ip: req.ip });
         const { token, exp } = signToken(user, config);
         return { token, expiresAt: exp, user: publicUser(user) };
       },

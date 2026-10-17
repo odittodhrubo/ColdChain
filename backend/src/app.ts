@@ -5,13 +5,15 @@ import { authenticate } from './auth/middleware';
 import { authRoutes } from './auth/routes';
 import type { Config } from './config';
 import type { Db } from './db';
+import { auditRoutes } from './modules/audit/routes';
+import { AuditLog } from './modules/audit/service';
 import { userRoutes } from './modules/users/routes';
 import { errorHandler, notFoundHandler } from './shared/errors';
 import { type AppContext, defineRoute, mountRoutes, type RouteDef } from './shared/http';
 import { requestLog } from './shared/logger';
 
 export function createApp(config: Config, db: Db) {
-  const ctx: AppContext = { config, db };
+  const ctx: AppContext = { config, db, audit: new AuditLog(db) };
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback'); // rate limiting sees the real client IP behind a local reverse proxy
@@ -34,11 +36,13 @@ export function createApp(config: Config, db: Db) {
     }),
     ...authRoutes(),
     ...userRoutes(),
+    ...auditRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));
   app.use(router);
   app.locals.routes = routes; // the RBAC test iterates every registered route
+  app.locals.ctx = ctx; // background jobs (index.ts) share the same services
 
   app.use(notFoundHandler);
   app.use(errorHandler);

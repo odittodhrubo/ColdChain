@@ -4,6 +4,17 @@ import { defineRoute, type RouteDef } from '../../shared/http';
 import { ROLES } from '../../rbac/permissions';
 import { createUser, listUsers, updateUser } from './service';
 
+// What changed, never the password itself.
+const changes = (
+  userId: number,
+  b: { name?: string; role?: string; active?: boolean; password?: string },
+) => ({
+  user_id: userId,
+  fields: Object.keys(b).sort(),
+  ...(b.role ? { role: b.role } : {}),
+  ...(b.active !== undefined ? { active: b.active } : {}),
+});
+
 const idParams = z.strictObject({ id: z.coerce.number().int().positive() });
 const name = z.string().trim().min(1).max(100);
 
@@ -27,8 +38,13 @@ export function userRoutes(): RouteDef[] {
         role: z.enum(ROLES),
         password: passwordSchema,
       }),
-      async handler({ body, res }, { db, config }) {
+      async handler({ body, res, user: actor }, { db, config, audit }) {
         const user = await createUser(db, body, config.BCRYPT_COST);
+        audit.append(`user:${actor!.id}`, 'USER_CREATED', {
+          user_id: user.id,
+          email: user.email,
+          role: user.role,
+        });
         res.status(201).json({ user });
       },
     }),
@@ -46,9 +62,15 @@ export function userRoutes(): RouteDef[] {
           password: passwordSchema.optional(),
         })
         .refine((b) => Object.keys(b).length > 0, 'nothing to update'),
-      handler: async ({ params, body }, { db, config }) => ({
-        user: await updateUser(db, params.id, body, config.BCRYPT_COST),
-      }),
+      async handler({ params, body, user: actor }, { db, config, audit }) {
+        const user = await updateUser(db, params.id, body, config.BCRYPT_COST);
+        audit.append(
+          `user:${actor!.id}`,
+          body.active === false ? 'USER_DISABLED' : 'USER_UPDATED',
+          changes(user.id, body),
+        );
+        return { user };
+      },
     }),
 
     defineRoute({
@@ -57,9 +79,11 @@ export function userRoutes(): RouteDef[] {
       access: { permission: 'user:manage' },
       params: idParams,
       // Users are disabled, not deleted: their id stays valid in the audit log and batch history.
-      handler: async ({ params }, { db, config }) => ({
-        user: await updateUser(db, params.id, { active: false }, config.BCRYPT_COST),
-      }),
+      async handler({ params, user: actor }, { db, config, audit }) {
+        const user = await updateUser(db, params.id, { active: false }, config.BCRYPT_COST);
+        audit.append(`user:${actor!.id}`, 'USER_DISABLED', changes(user.id, { active: false }));
+        return { user };
+      },
     }),
   ];
 }

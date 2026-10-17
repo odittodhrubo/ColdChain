@@ -27,6 +27,8 @@ const EXAMPLES: Record<string, Example> = {
     body: { name: 'Renamed' },
   }),
   'DELETE /api/users/:id': async (t) => ({ path: `/api/users/${(await addUser(t, 'INSPECTOR')).id}` }),
+  'GET /api/audit': async () => ({ path: '/api/audit?page=1&pageSize=5' }),
+  'GET /api/audit/verify': async () => ({}),
 };
 
 const key = (r: RouteDef) => `${r.method.toUpperCase()} ${r.path}`;

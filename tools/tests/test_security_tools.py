@@ -69,6 +69,12 @@ def db(tmp_path):
         con.execute("CREATE TABLE readings (id INTEGER PRIMARY KEY, temp REAL)")
         con.execute("INSERT INTO audit_log VALUES (5, '{\"a\":1}', 'h5')")
         con.execute("INSERT INTO readings VALUES (12, 4.5)")
+        con.executescript(  # the backend's append-only guard (migration 002_audit.sql)
+            "CREATE TRIGGER audit_log_no_update BEFORE UPDATE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;"
+            "CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON audit_log "
+            "BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;"
+        )
     return path
 
 
@@ -84,6 +90,9 @@ def test_tamper_and_restore(db, monkeypatch):
         assert con.execute("SELECT payload FROM audit_log WHERE id=5").fetchone()[0] == '{"a":1}'
         assert con.execute("SELECT temp FROM readings WHERE id=12").fetchone()[0] == 4.5
     assert not tamper.backup_path(db).exists()
+    with sqlite3.connect(db) as con:  # the guard is back after the edit and the restore
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            con.execute("UPDATE audit_log SET payload = 'x' WHERE id = 5")
 
 
 def test_tamper_rejects_unknown_columns_and_rows(db, monkeypatch):
