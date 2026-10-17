@@ -1,5 +1,6 @@
 import { purgeRevoked } from '../auth/tokens';
 import { writeAnchor } from '../modules/audit/chain';
+import { refreshAllStatuses } from '../modules/batches/service';
 import type { AppContext } from '../shared/http';
 import { notifyOps } from '../shared/notify';
 
@@ -21,7 +22,9 @@ export function startJobs(ctx: AppContext): () => void {
     setInterval(() => void anchorAudit(ctx), ANCHOR_EVERY_MS),
     setInterval(() => ctx.ingest.tick(), 1000), // seq-gap SYNC_REQUEST, offline watchdog
     setInterval(() => ctx.ingest.purgeNonces(), 60_000), // nonces only matter for NONCE_TTL_S
+    setInterval(() => refreshAllStatuses(ctx), 10 * 60_000), // expiry turns batches DISCARD at UTC midnight
   ];
+  refreshAllStatuses(ctx);
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation
   return () => {
     timers.forEach(clearInterval);

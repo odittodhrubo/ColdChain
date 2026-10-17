@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { can, PERMISSIONS, ROLES, type Role } from '../src/rbac/permissions';
 import type { RouteDef } from '../src/shared/http';
-import { addUser, bearer, makeApp, PASSWORD, tokenFor, type TestApp } from './helpers';
+import { type BatchInput, createBatch } from '../src/modules/batches/service';
+import type { AppContext } from '../src/shared/http';
+import { addFridge, addUser, batchInput, bearer, makeApp, PASSWORD, tokenFor, type TestApp } from './helpers';
+
+const newBatch = (t: TestApp, over: Record<string, unknown> = {}) =>
+  createBatch(t.app.locals.ctx as AppContext, batchInput(addFridge(t), over) as BatchInput);
 
 // One valid request per route. A route registered without an entry here fails the suite: every new route
 // must come with a permission decision and a test (deny by default).
@@ -31,6 +36,17 @@ const EXAMPLES: Record<string, Example> = {
   'GET /api/audit/verify': async () => ({}),
   'GET /api/security/events': async () => ({ path: '/api/security/events?reason=BAD_SIG' }),
   'GET /api/metrics/ingest': async () => ({}),
+  'GET /api/batches': async () => ({}),
+  'POST /api/batches': async (t) => ({ body: batchInput(addFridge(t)) }),
+  'GET /api/batches/:id': async (t) => ({ path: `/api/batches/${newBatch(t).id}` }),
+  'PATCH /api/batches/:id': async (t) => ({ path: `/api/batches/${newBatch(t).id}`, body: { quantity: 3 } }),
+  'DELETE /api/batches/:id': async (t) => ({ path: `/api/batches/${newBatch(t, { quantity: 0 }).id}` }),
+  'POST /api/batches/:id/move': async (t) => ({
+    path: `/api/batches/${newBatch(t).id}/move`,
+    body: { to_fridge_id: addFridge(t) },
+  }),
+  'GET /api/batches/:id/qr': async (t) => ({ path: `/api/batches/${newBatch(t).id}/qr` }),
+  'GET /api/public/batch/:token': async (t) => ({ path: `/api/public/batch/${newBatch(t).public_token}` }),
 };
 
 const key = (r: RouteDef) => `${r.method.toUpperCase()} ${r.path}`;
@@ -75,6 +91,7 @@ describe('permission matrix matches Part 3.8', () => {
     const roles = (p: keyof typeof PERMISSIONS) => [...PERMISSIONS[p]].sort();
     expect(roles('dashboard:read')).toEqual(['ADMIN', 'INSPECTOR', 'PHARMACIST']);
     expect(roles('batch:write')).toEqual(['ADMIN', 'PHARMACIST']);
+    expect(roles('batch:delete')).toEqual(['ADMIN']);
     expect(roles('relocation:confirm')).toEqual(['ADMIN', 'PHARMACIST']);
     expect(roles('alert:ack')).toEqual(['ADMIN', 'PHARMACIST']);
     expect(roles('latch:reset')).toEqual(['ADMIN']);

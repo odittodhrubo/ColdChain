@@ -3,10 +3,12 @@ import { z, type ZodType } from 'zod';
 import type { Config } from '../config';
 import type { Db } from '../db';
 import type { AuditLog } from '../modules/audit/service';
+import type { BatchView } from '../modules/batches/service';
 import type { Ingestor } from '../mqtt/ingest';
 import type { Realtime } from '../realtime';
 import { can, type Permission, type Role } from '../rbac/permissions';
 import { forbidden, unauthenticated } from './errors';
+import type { BatchStatus } from './status';
 
 // Route registry. Every route declares who may call it; there is no default, so a route cannot be added
 // without a permission decision (deny by default). The RBAC test iterates this registry.
@@ -35,6 +37,12 @@ export interface AppContext {
   audit: AuditLog;
   realtime: Realtime; // replaced by Socket.IO in index.ts; silent in tests
   ingest: Ingestor;
+  hooks: AppHooks;
+}
+
+/** Cross-module callbacks, wired in app.ts. The alert engine (P12) subscribes here. */
+export interface AppHooks {
+  batchStatusChanged?: (batch: BatchView, from: BatchStatus, to: BatchStatus) => void;
 }
 
 type Method = 'get' | 'post' | 'patch' | 'put' | 'delete';

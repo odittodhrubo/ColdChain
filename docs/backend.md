@@ -60,9 +60,29 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 
 `GET /api/users`, `POST /api/users` `{email, name, role, password}`, `PATCH /api/users/:id` (any of `name`, `role`, `active`, `password`), `DELETE /api/users/:id` (disables; users are never deleted, so audit and batch history keep valid references). Passwords need at least 10 characters and three of: lowercase, uppercase, digit, symbol. Hashes are never returned. The last active admin cannot be disabled or demoted (`409 LAST_ADMIN`); the check runs again inside the write transaction.
 
+## Inventory and public QR check (P10)
+
+`src/modules/batches/`. A batch has `name`, `manufacturer`, `lot_number`, `quantity`, `expiry_date` (`YYYY-MM-DD`), `criticality` (1 low to 3 high), a random `public_token`, and derived `status`, `remaining_pct`, `used_minutes`, `expired`.
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /api/batches?fridge_id&status&expiring_within_days&q&page&pageSize` | `dashboard:read` | `q` searches name, lot and manufacturer (LIKE wildcards escaped) |
+| `POST /api/batches` | `batch:write` | needs `fridge_id`; `409 FRIDGE_FULL` at capacity; expiry must be in the future |
+| `GET /api/batches/:id` | `dashboard:read` | batch, assignment history, exposure summary (with `demoScale`) |
+| `PATCH /api/batches/:id` | `batch:write` | any of `name`, `quantity`, `criticality`, `expiry_date` |
+| `DELETE /api/batches/:id` | `batch:delete` (Admin) | soft delete, only at quantity 0 (`409 QUANTITY_NOT_ZERO`); frees the fridge slot |
+| `POST /api/batches/:id/move` `{to_fridge_id}` | `batch:write` | atomic; `409 BATCH_DISCARDED`, `FRIDGE_FULL`, `SAME_FRIDGE` |
+| `GET /api/batches/:id/qr?format=svg\|png` | `dashboard:read` | encodes `${PUBLIC_BASE_URL}/check/<token>`; the SVG carries name and lot as a caption |
+| `GET /api/public/batch/:token` | public | see below |
+
+- **Where a batch is:** `batch_assignments` intervals (`from_ts`/`to_ts` in unix ms). A partial unique index allows one open interval per batch. A move closes the open interval and opens the next at the same instant, together with the `BATCH_MOVED` audit entry, in one transaction: any failure leaves the batch where it was, and exposure (P11) is attributed to exactly one fridge at every moment. The batch keeps its used budget when it moves.
+- **Capacity** counts batches currently in the fridge (seed: 20 per fridge).
+- **Status** comes from one function, `deriveBatchStatus(remaining_pct, expiry_date, discarded)` in `shared/status.ts`: `DISCARD` when out of budget, expired (expiry date before today in UTC) or discarded before; `AT_RISK` below 20 % remaining; else `SAFE`. Every change is persisted with a `BATCH_STATUS_CHANGED` audit entry, a `batch:update` push and the `batchStatusChanged` hook for alerts (P12). Reaching `DISCARD` sets `discarded_at`, which makes it permanent: no API can revive the batch. A job re-derives all batches every 10 minutes (and at start) because expiry moves with the calendar.
+- **Public check** (`GET /api/public/batch/:token`, no login): returns exactly `{name, lot_number, expiry_date, status, expired, last_checked}` (a whitelist, never fridge ids, exposure, users or internal ids). `last_checked` is the time of the latest reading in the batch's fridge. Unknown and malformed tokens get the same generic `404`; 60 requests per minute per IP (`429 RATE_LIMITED`); `Cache-Control: no-store`. Tokens are 12 URL-safe characters (72 random bits), so the inventory cannot be enumerated.
+
 ## Database
 
-`openDb(DB_PATH)` sets `journal_mode=WAL`, `foreign_keys=ON` and `busy_timeout=5000`, then applies every `src/db/migrations/NNN_*.sql` not yet in `schema_migrations`, each in a transaction. Re-running is a no-op. `001_init.sql` creates the contract §6 tables (`users`, `devices`, `fridges`, `readings`, `events`, `batches`, `batch_assignments`, `alerts`, `nonces`, `security_events`, `audit_log`, `relocation_plans`, `ml_predictions`) plus `revoked_tokens` and `login_attempts`. Keys: `readings UNIQUE(device_id, seq)`, `events UNIQUE(device_id, seq)`, `nonces UNIQUE(device_id, nonce)` + `expires_at` index, `batches UNIQUE(public_token)`; indexes on `readings(fridge_id, ts)`, `events(fridge_id, ts)` and `batch_assignments(batch_id, to_ts)`.
+`openDb(DB_PATH)` sets `journal_mode=WAL`, `foreign_keys=ON` and `busy_timeout=5000`, then applies every `src/db/migrations/NNN_*.sql` not yet in `schema_migrations`, each in a transaction. Re-running is a no-op. `003_inventory.sql` adds the P10 batch columns. `001_init.sql` creates the contract §6 tables (`users`, `devices`, `fridges`, `readings`, `events`, `batches`, `batch_assignments`, `alerts`, `nonces`, `security_events`, `audit_log`, `relocation_plans`, `ml_predictions`) plus `revoked_tokens` and `login_attempts`. Keys: `readings UNIQUE(device_id, seq)`, `events UNIQUE(device_id, seq)`, `nonces UNIQUE(device_id, nonce)` + `expires_at` index, `batches UNIQUE(public_token)`; indexes on `readings(fridge_id, ts)`, `events(fridge_id, ts)` and `batch_assignments(batch_id, to_ts)`.
 
 **Device secrets** are stored encrypted with AES-256-GCM under `APP_SECRET_KEY` (`v1:<iv>:<tag>:<ciphertext>`). The GCM tag makes a modified value fail to decrypt rather than yield a wrong secret.
 

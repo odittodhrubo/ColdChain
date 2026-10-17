@@ -35,3 +35,25 @@ export function tokenFor(t: TestApp, user: { id: number; role: Role; name: strin
 }
 
 export const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
+
+let fridges = 0;
+/** A fresh fridge (unique id) so tests never compete for capacity. */
+export function addFridge(t: TestApp, capacity = 20): string {
+  fridges += 1;
+  const id = `test-fridge-${fridges}`;
+  t.db
+    .prepare('INSERT INTO fridges (id, name, capacity, created_at) VALUES (?, ?, ?, ?)')
+    .run(id, `Test Fridge ${fridges}`, capacity, Date.now());
+  return id;
+}
+
+export const batchInput = (fridgeId: string, over: Record<string, unknown> = {}) => ({
+  name: 'COVID-19 mRNA',
+  manufacturer: 'Acme Bio',
+  lot_number: `LOT-${Math.random().toString(36).slice(2, 8)}`,
+  quantity: 50,
+  expiry_date: '2099-12-31',
+  criticality: 3,
+  fridge_id: fridgeId,
+  ...over,
+});

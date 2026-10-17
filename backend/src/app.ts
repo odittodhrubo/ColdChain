@@ -6,6 +6,7 @@ import { authRoutes } from './auth/routes';
 import type { Config } from './config';
 import type { Db } from './db';
 import { auditRoutes } from './modules/audit/routes';
+import { batchRoutes, publicBatchRoutes } from './modules/batches/routes';
 import { AuditLog } from './modules/audit/service';
 import { securityRoutes } from './modules/security/routes';
 import { userRoutes } from './modules/users/routes';
@@ -16,7 +17,7 @@ import { type AppContext, defineRoute, mountRoutes, type RouteDef } from './shar
 import { requestLog } from './shared/logger';
 
 export function createApp(config: Config, db: Db) {
-  const ctx = { config, db, audit: new AuditLog(db), realtime: silentRealtime } as AppContext;
+  const ctx = { config, db, audit: new AuditLog(db), realtime: silentRealtime, hooks: {} } as AppContext;
   ctx.ingest = new Ingestor(ctx); // fed by the MQTT client in index.ts, or directly in tests
   const app = express();
   app.disable('x-powered-by');
@@ -42,6 +43,8 @@ export function createApp(config: Config, db: Db) {
     ...userRoutes(),
     ...auditRoutes(),
     ...securityRoutes(),
+    ...batchRoutes(),
+    ...publicBatchRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));

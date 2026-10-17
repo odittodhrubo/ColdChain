@@ -9,6 +9,7 @@ const ALL: readonly Role[] = ROLES;
 export const PERMISSIONS = {
   'dashboard:read': ALL, // dashboard, fridges, batches, alerts
   'batch:write': ['ADMIN', 'PHARMACIST'], // create/edit batches, move between fridges
+  'batch:delete': ['ADMIN'], // soft-delete an emptied batch (P10: Admin only, quantity 0)
   'relocation:confirm': ['ADMIN', 'PHARMACIST'],
   'alert:ack': ['ADMIN', 'PHARMACIST'],
   'latch:reset': ['ADMIN'], // reset red latch, discard acknowledgement
