@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "coldchain-tools"
 version = "0.1.0"
-description = "ColdChain virtual node, attack and tamper tools (built out in P06)"
+description = "ColdChain virtual fridge node, simulation engine, attack and tamper tools"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["paho-mqtt>=2.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "platformio>=6.1"]

@@ -40,3 +40,6 @@ ml/.cache/
 .DS_Store
 Thumbs.db
 .idea/
+
+# virtual node state (persisted seq per simulated device)
+tools/.state/
