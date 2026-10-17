@@ -1,22 +1,15 @@
-import path from 'node:path';
-import dotenv from 'dotenv';
 import { createApp } from './app';
-import { ConfigError, loadConfig, type Config } from './config';
+import { purgeRevoked } from './auth/tokens';
+import { loadEnvOrExit } from './env';
+import { openDb } from './db';
+import { logger } from './shared/logger';
 
-// .env normally lives at the repo root; a backend/.env takes precedence when present.
-dotenv.config({ path: [path.resolve('.env'), path.resolve('..', '.env')], quiet: true });
+const config = loadEnvOrExit();
+const db = openDb(config.DB_PATH);
 
-let config: Config;
-try {
-  config = loadConfig();
-} catch (err) {
-  if (err instanceof ConfigError) {
-    console.error(err.message);
-    process.exit(1);
-  }
-  throw err;
-}
+// Housekeeping: revoked tokens are only needed until they would have expired anyway.
+setInterval(() => purgeRevoked(db), 10 * 60_000).unref();
 
-createApp(config).listen(config.PORT, () => {
-  console.log(`backend listening on http://localhost:${config.PORT} (${config.NODE_ENV})`);
+createApp(config, db).listen(config.PORT, () => {
+  logger.info(`backend listening on http://localhost:${config.PORT} (${config.NODE_ENV})`);
 });
