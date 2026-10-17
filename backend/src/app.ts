@@ -7,13 +7,17 @@ import type { Config } from './config';
 import type { Db } from './db';
 import { auditRoutes } from './modules/audit/routes';
 import { AuditLog } from './modules/audit/service';
+import { securityRoutes } from './modules/security/routes';
 import { userRoutes } from './modules/users/routes';
+import { Ingestor } from './mqtt/ingest';
+import { silentRealtime } from './realtime';
 import { errorHandler, notFoundHandler } from './shared/errors';
 import { type AppContext, defineRoute, mountRoutes, type RouteDef } from './shared/http';
 import { requestLog } from './shared/logger';
 
 export function createApp(config: Config, db: Db) {
-  const ctx: AppContext = { config, db, audit: new AuditLog(db) };
+  const ctx = { config, db, audit: new AuditLog(db), realtime: silentRealtime } as AppContext;
+  ctx.ingest = new Ingestor(ctx); // fed by the MQTT client in index.ts, or directly in tests
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback'); // rate limiting sees the real client IP behind a local reverse proxy
@@ -37,6 +41,7 @@ export function createApp(config: Config, db: Db) {
     ...authRoutes(),
     ...userRoutes(),
     ...auditRoutes(),
+    ...securityRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));

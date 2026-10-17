@@ -14,7 +14,7 @@ src/
   scripts/seed.ts       npm run seed
 ```
 
-`jobs/` runs background work (token purge, audit anchors, reject coalescing). `realtime/`, `mqtt/` and `ml/` are added by the prompts that need them (P09 onwards).
+`jobs/` runs background work: token purge, audit anchors, reject coalescing, the ingest tick and nonce purge. `mqtt/` is the device pipeline and `realtime/` the Socket.IO push; `ml/` arrives in P18.
 
 ## Requests and errors
 
@@ -103,6 +103,45 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 `GET /api/audit?type&actor&from&to&page&pageSize` (permission `audit:read`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
 
+## Device ingestion (MQTT)
+
+`src/mqtt/`: `client.ts` (broker connection), `ingest.ts` (pipeline), `envelope.ts`, `schemas.ts`, `devices.ts`, `commands.ts`.
+
+**Broker:** `mqtt` with TLS for `mqtts://`, and reconnect backoff from 1 s doubling to 30 s. It subscribes to `{prefix}/+/telemetry`, `+/event`, `+/sync`, `+/cmdack` and `+/status` (QoS 1). The `device_id` comes from the **topic** and must equal the envelope's.
+
+**Verification, in this order** (the first failure wins):
+
+| Step | Reject reason |
+|---|---|
+| topic shape, size ≤ 16 kB, JSON, envelope fields (`v`, 16-hex nonce, ...), envelope `kind` = topic kind | `BAD_JSON` |
+| device in the topic exists, is active, equals the envelope's `device_id` (secrets decrypted once, cached 10 s) | `UNKNOWN_DEVICE` |
+| \|now − ts\| ≤ `HMAC_WINDOW_S` on the **send** time (reading times inside a sync are never checked) | `STALE_TS` (the skew is recorded) |
+| HMAC over `device_id\|kind\|ts\|nonce\|body`, compared with `crypto.timingSafeEqual` after a length/format check | `BAD_SIG` |
+| insert into `nonces` (`UNIQUE(device_id, nonce)`, `expires_at = now + NONCE_TTL_S`), **only now that the HMAC passed**, so unauthenticated senders cannot fill the table | `REPLAY` |
+| zod schema of the body per kind (strict) | `BAD_BODY` |
+
+`NONCE_TTL_S` (120) is at least 2 × the window (30), so a captured message cannot be replayed even when its timestamp would be fresh again. Expired nonces are purged every minute.
+
+**Rejects** go to `security_events` (`ts, device_id, reason, topic, size, sample_hash` = SHA-256 of the payload, `detail` such as `{skew_s}`), to the audit chain as a coalesced `SECURITY_REJECT` (one per device + reason per minute, with a count), to Socket.IO `security:event`, and to the log. The payload and the secret are never stored or logged.
+
+**Accepted messages:**
+
+- **telemetry:** `INSERT … ON CONFLICT(device_id, seq) DO NOTHING`. The server recomputes the status with the shared `classify()` (a mismatch with the device's `state` is logged at debug level as `STATE_MISMATCH`), updates the live state, emits `fridge:update`, calls `hooks.onReadingsInserted(fridgeId, rows, {late:false})` (heat engine, P11), and writes a `TELEMETRY_CHECKPOINT` per 100 readings.
+- **event:** stored once. `DOOR_ALARM`, `POWER_FAIL`, `POWER_RESTORE`, `LATCH_SET`, `LATCH_RESET` and `SENSOR_FAULT` are audited as `DEVICE_EVENT`. `LATCH_SET` / `LATCH_RESET` update `fridges.latch_state` (the reset confirms an admin reset). Every event goes to `hooks.onDeviceEvent` (alerts, P12). `WIFI_BACK` with an open seq gap sends `SYNC_REQUEST` at once.
+- **sync:** at most `SYNC_CHUNK` items, `from_seq` / `to_seq` matching the items. Readings and buffered events are inserted sorted by seq in one transaction, marked `late=1`, and passed to `onReadingsInserted(…, {late:true})` so exposure is recomputed. Then a **signed ack** `{seq_upto}` (fresh server nonce, current ts, HMAC with the device secret) goes to `…/ack`. `seq_upto` is the highest contiguous seq counted from the chunk's `from_seq` (contract §5): it never covers anything the device still holds that the server lacks, and reboot seq jumps or a lost live message cannot stall the sync. A resent chunk is stored once and re-acked with the same value.
+- **cmdack:** forwarded to `hooks.onCommandAck` and Socket.IO `device:cmdack`.
+- **status** (LWT `online` / `offline`): unsigned, so it is only a hint (`device:status` with `hint:true`). It is never stored and never decides the online state.
+
+**Gaps and offline:** if a device's seq jumps past `last + 1` and no sync arrives within 30 s, a signed `SYNC_REQUEST` command is sent (once per gap). A device with no accepted message for 20 s is marked `online:false` (`fridge:update`), and after 60 s `hooks.onDeviceOffline` fires once (alert, P12).
+
+**Run one ingesting backend per broker prefix.** Two instances on the same database would both process every message, and the second correctly rejects each one as `REPLAY`.
+
+**Endpoints:** `GET /api/security/events?reason&device_id&page&pageSize` (`audit:read`), `GET /api/metrics/ingest` (`metrics:read`: Admin and Inspector) with accepted counts by kind, rejected counts by reason, late readings, sync requests, and per device last seen / online / LWT hint / max seq / acked up to / open gap.
+
+## Realtime
+
+Socket.IO on the same HTTP server. Clients connect with `io(url, {auth: {token: <JWT>}})`; the token is verified, checked against revocations, and the user must be active. Events: `fridge:update` (live state, including `online`), `security:event`, `device:status`, `device:cmdack`; later prompts add `batch:update`, `alert:new`, `prediction:update` and `relocation:update`.
+
 ## Seed
 
 ```bash
@@ -126,4 +165,6 @@ The dev image (Node 20) installs `python3 make g++`, because `better-sqlite3` ha
 | `auth.test.ts` | login, identical error + bcrypt run for unknown email, disabled account, lockout after 5 and unlock, per-IP rate limit, `$2b$12$` hashes, logout revocation, expired / tampered / wrong-key / `alg:none` tokens, demotion and disabling take effect at once |
 | `rbac.test.ts` | every registered route × Admin / Pharmacist / Inspector / anonymous, plus the matrix itself |
 | `audit.test.ts` | canonical JSON edge cases, genesis and links, clean / empty log, triggers, each tamper case with its reason and record id (edited payload, edited hash, changed ts, deleted row, deleted first row, row inserted in the middle, swapped rows, replaced genesis), deleted tail caught by the anchor, recomputed chain caught by the anchor, partial `?from`, 100 parallel appends and two connections → one valid chain, 100k rows < 3 s without blocking, checkpoints (late rows, edited and deleted readings), reject coalescing, bounded queue, API (logins, failures, user changes, pagination, verify, NDJSON stream) |
+| `ingest.test.ts` | the shared HMAC vectors (and the vector envelope accepted end to end), server `classify()` on the status vectors, accepted telemetry (stored once, live state, server status, push), checkpoint every 100, **each reject reason** (12 cases including topic / device and kind mismatch, oversized, future ts, tampered body, unknown field) logged in `security_events` + audit + realtime, recorded skew, replay of identical bytes, the nonce table cannot be filled by forgers, disabled device, flood (p95 < 20 ms, coalesced to one audit row), events (audit, latch state, alert hook), **sync of 360 readings in 15 chunks with a duplicate and shuffled order → exactly 360 ordered rows, acks signed and monotonic, final ack 360**, lost ack, lost live message / seq jump, ack extension only through stored seqs, old reading ts accepted, oversized / inconsistent chunk, late hook, gap → `SYNC_REQUEST` after 30 s, `WIFI_BACK`, offline watchdog 20 s / 60 s, LWT hint, nonce purge, cmdack, metrics and security-events API |
+| `realtime.test.ts` | Socket.IO pushes to a valid JWT; missing, invalid and revoked tokens refused |
 | `users.test.ts` | create (no hash leaked), duplicate email, weak passwords, unknown fields rejected, role change, password reset, disable, last-admin protection, seed (3 users, 2 fridges, 2 devices, encrypted secrets, idempotent) |

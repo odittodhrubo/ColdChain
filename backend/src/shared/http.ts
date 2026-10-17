@@ -3,6 +3,8 @@ import { z, type ZodType } from 'zod';
 import type { Config } from '../config';
 import type { Db } from '../db';
 import type { AuditLog } from '../modules/audit/service';
+import type { Ingestor } from '../mqtt/ingest';
+import type { Realtime } from '../realtime';
 import { can, type Permission, type Role } from '../rbac/permissions';
 import { forbidden, unauthenticated } from './errors';
 
@@ -31,6 +33,8 @@ export interface AppContext {
   db: Db;
   config: Config;
   audit: AuditLog;
+  realtime: Realtime; // replaced by Socket.IO in index.ts; silent in tests
+  ingest: Ingestor;
 }
 
 type Method = 'get' | 'post' | 'patch' | 'put' | 'delete';

@@ -29,6 +29,8 @@ const EXAMPLES: Record<string, Example> = {
   'DELETE /api/users/:id': async (t) => ({ path: `/api/users/${(await addUser(t, 'INSPECTOR')).id}` }),
   'GET /api/audit': async () => ({ path: '/api/audit?page=1&pageSize=5' }),
   'GET /api/audit/verify': async () => ({}),
+  'GET /api/security/events': async () => ({ path: '/api/security/events?reason=BAD_SIG' }),
+  'GET /api/metrics/ingest': async () => ({}),
 };
 
 const key = (r: RouteDef) => `${r.method.toUpperCase()} ${r.path}`;
@@ -79,5 +81,6 @@ describe('permission matrix matches Part 3.8', () => {
     expect(roles('user:manage')).toEqual(['ADMIN']);
     expect(roles('audit:read')).toEqual(['ADMIN', 'INSPECTOR', 'PHARMACIST']);
     expect(roles('audit:verify')).toEqual(['ADMIN', 'INSPECTOR', 'PHARMACIST']);
+    expect(roles('metrics:read')).toEqual(['ADMIN', 'INSPECTOR']);
   });
 });

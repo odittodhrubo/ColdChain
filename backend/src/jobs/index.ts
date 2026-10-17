@@ -19,6 +19,8 @@ export function startJobs(ctx: AppContext): () => void {
     setInterval(() => purgeRevoked(ctx.db), 10 * 60_000),
     setInterval(() => ctx.audit.flushRejects(), 10_000), // coalesced SECURITY_REJECT windows, one per minute
     setInterval(() => void anchorAudit(ctx), ANCHOR_EVERY_MS),
+    setInterval(() => ctx.ingest.tick(), 1000), // seq-gap SYNC_REQUEST, offline watchdog
+    setInterval(() => ctx.ingest.purgeNonces(), 60_000), // nonces only matter for NONCE_TTL_S
   ];
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation
   return () => {
