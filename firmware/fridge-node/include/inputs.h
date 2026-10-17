@@ -5,7 +5,8 @@
 
 #include "node_config.h"
 
-// A raw level must stay unchanged for DEBOUNCE_MS before it is accepted (switch bounce measured in P01 is < 5 ms).
+// A raw level must stay unchanged for DEBOUNCE_MS before it is accepted. 30 ms covers typical mechanical bounce
+// (under 10 ms); confirm with the raw transitions the hw-smoke sketch prints and raise it if a burst is longer.
 class Debouncer {
  public:
   void reset(bool level) { stable_ = candidate_ = level; }

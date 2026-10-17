@@ -82,6 +82,8 @@ Every 5 s the node prints one line, for example:
 
 Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`) and state changes print as `[event] …` and `[state] …` lines. The power-fail and Wi-Fi buttons are debounced and reported now; their behaviour arrives in P05.
 
+All four inputs use a 30 ms debounce (`cfg::DEBOUNCE_MS`). Typical mechanical bounce is under 10 ms. On real hardware, run the `hw-smoke` sketch, read the largest burst of raw transitions, and raise the value if a burst is longer.
+
 ## Tests
 
 ```bash
