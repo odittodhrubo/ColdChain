@@ -69,7 +69,7 @@ export function batchRoutes(): RouteDef[] {
         page: int.min(1).default(1),
         pageSize: int.min(1).max(200).default(50),
       }),
-      handler({ query }, { db }) {
+      handler({ query }, { db, config }) {
         const { page, pageSize, ...filters } = query;
         const all = listBatches(db, filters);
         return {
@@ -77,6 +77,7 @@ export function batchRoutes(): RouteDef[] {
           page,
           pageSize,
           total: all.length,
+          demoScale: config.DEMO_TIME_SCALE, // exposure is accelerated when != 1 (P11): the UI shows a banner
         };
       },
     }),
@@ -93,7 +94,9 @@ export function batchRoutes(): RouteDef[] {
         fridge_id: fridgeId,
       }),
       handler({ body, user, res }, ctx) {
-        res.status(201).json({ batch: createBatch(ctx, body, user!.id) });
+        res
+          .status(201)
+          .json({ batch: createBatch(ctx, body, user!.id), demoScale: ctx.config.DEMO_TIME_SCALE });
       },
     }),
 
@@ -106,6 +109,7 @@ export function batchRoutes(): RouteDef[] {
         const batch = getBatch(db, params.id);
         return {
           batch,
+          demoScale: config.DEMO_TIME_SCALE,
           assignments: assignmentHistory(db, params.id),
           exposure: {
             weighted_exposure_s: batch.weighted_exposure_s,
@@ -127,7 +131,10 @@ export function batchRoutes(): RouteDef[] {
         .strictObject(editable)
         .partial()
         .refine((b) => Object.keys(b).length > 0, 'nothing to update'),
-      handler: ({ params, body, user }, ctx) => ({ batch: updateBatch(ctx, params.id, body, user!.id) }),
+      handler: ({ params, body, user }, ctx) => ({
+        batch: updateBatch(ctx, params.id, body, user!.id),
+        demoScale: ctx.config.DEMO_TIME_SCALE,
+      }),
     }),
 
     defineRoute({
@@ -146,6 +153,7 @@ export function batchRoutes(): RouteDef[] {
       body: z.strictObject({ to_fridge_id: fridgeId }),
       handler: ({ params, body, user }, ctx) => ({
         batch: moveBatch(ctx, params.id, body.to_fridge_id, user!.id),
+        demoScale: ctx.config.DEMO_TIME_SCALE,
       }),
     }),
 

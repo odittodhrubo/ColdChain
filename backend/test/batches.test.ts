@@ -23,7 +23,7 @@ async function asRole(t: TestApp, role: 'ADMIN' | 'PHARMACIST' | 'INSPECTOR') {
 }
 
 const setExposure = (t: TestApp, id: number, s: number) =>
-  t.db.prepare('UPDATE batches SET weighted_exposure_s = ? WHERE id = ?').run(s, id);
+  t.db.prepare('UPDATE batches SET exposure_ms = ? WHERE id = ?').run(s * 1000, id);
 
 const openAssignments = (t: TestApp, id: number) =>
   t.db

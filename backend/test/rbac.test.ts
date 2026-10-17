@@ -47,6 +47,12 @@ const EXAMPLES: Record<string, Example> = {
   }),
   'GET /api/batches/:id/qr': async (t) => ({ path: `/api/batches/${newBatch(t).id}/qr` }),
   'GET /api/public/batch/:token': async (t) => ({ path: `/api/public/batch/${newBatch(t).public_token}` }),
+  'GET /api/batches/:id/exposure': async (t) => ({ path: `/api/batches/${newBatch(t).id}/exposure` }),
+  // an unlatched fridge: the reset is a no-op that answers at once (the device round trip is in exposure.test.ts)
+  'POST /api/fridges/:id/reset-latch': async (t) => ({
+    path: `/api/fridges/${addFridge(t)}/reset-latch`,
+    body: { reason: 'disposed of the discarded vials' },
+  }),
 };
 
 const key = (r: RouteDef) => `${r.method.toUpperCase()} ${r.path}`;

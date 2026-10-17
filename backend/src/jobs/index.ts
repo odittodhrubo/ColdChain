@@ -21,6 +21,7 @@ export function startJobs(ctx: AppContext): () => void {
     setInterval(() => ctx.audit.flushRejects(), 10_000), // coalesced SECURITY_REJECT windows, one per minute
     setInterval(() => void anchorAudit(ctx), ANCHOR_EVERY_MS),
     setInterval(() => ctx.ingest.tick(), 1000), // seq-gap SYNC_REQUEST, offline watchdog
+    setInterval(() => ctx.heat.tick(), 10_000), // exposure over data holes that were never synced
     setInterval(() => ctx.ingest.purgeNonces(), 60_000), // nonces only matter for NONCE_TTL_S
     setInterval(() => refreshAllStatuses(ctx), 10 * 60_000), // expiry turns batches DISCARD at UTC midnight
   ];

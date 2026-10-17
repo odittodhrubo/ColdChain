@@ -10,7 +10,9 @@ import { batchRoutes, publicBatchRoutes } from './modules/batches/routes';
 import { AuditLog } from './modules/audit/service';
 import { securityRoutes } from './modules/security/routes';
 import { userRoutes } from './modules/users/routes';
-import { Ingestor } from './mqtt/ingest';
+import { Ingestor, type IngestHooks } from './mqtt/ingest';
+import { HeatEngine } from './modules/exposure/engine';
+import { exposureRoutes } from './modules/exposure/routes';
 import { silentRealtime } from './realtime';
 import { errorHandler, notFoundHandler } from './shared/errors';
 import { type AppContext, defineRoute, mountRoutes, type RouteDef } from './shared/http';
@@ -19,6 +21,12 @@ import { requestLog } from './shared/logger';
 export function createApp(config: Config, db: Db) {
   const ctx = { config, db, audit: new AuditLog(db), realtime: silentRealtime, hooks: {} } as AppContext;
   ctx.ingest = new Ingestor(ctx); // fed by the MQTT client in index.ts, or directly in tests
+  ctx.heat = new HeatEngine(ctx);
+  Object.assign(ctx.ingest.hooks, {
+    onReadingsInserted: (fridgeId, readings, opts) => ctx.heat.onReadings(fridgeId, readings, opts),
+    onDeviceEvent: (fridgeId, event) => ctx.heat.onDeviceEvent(fridgeId, event),
+    onCommandAck: (deviceId, ack) => ctx.heat.onCommandAck(deviceId, ack),
+  } satisfies IngestHooks);
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback'); // rate limiting sees the real client IP behind a local reverse proxy
@@ -45,6 +53,7 @@ export function createApp(config: Config, db: Db) {
     ...securityRoutes(),
     ...batchRoutes(),
     ...publicBatchRoutes(),
+    ...exposureRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));

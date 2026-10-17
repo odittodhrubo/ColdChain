@@ -1,74 +1,11 @@
-import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import vectors from '../../contracts/test_vectors.json';
 import { flushAuditFor } from './ingestHelpers';
-import { bearer, makeApp, addUser, tokenFor } from './helpers';
-import { encryptSecret } from '../src/shared/secretbox';
+import { bearer, addUser, tokenFor } from './helpers';
 import { sign, type Envelope } from '../src/mqtt/envelope';
-import {
-  GAP_SYNC_AFTER_MS,
-  OFFLINE_AFTER_MS,
-  OFFLINE_ALERT_AFTER_MS,
-  type Ingestor,
-} from '../src/mqtt/ingest';
-import { RecordingRealtime } from '../src/realtime';
-import type { AppContext } from '../src/shared/http';
+import { envelope, NOW, nowS, reading, SECRET, setup, telemetry, topic } from './deviceHelpers';
+import { GAP_SYNC_AFTER_MS, OFFLINE_AFTER_MS, OFFLINE_ALERT_AFTER_MS } from '../src/mqtt/ingest';
 import { classify } from '../src/shared/status';
-
-const SECRET = 'a1'.repeat(32);
-const PREFIX = 'coldchain/v1';
-const NOW = 1_767_225_600_000; // fixed clock (unix ms)
-const nowS = NOW / 1000;
-
-function setup(devices: Record<string, string> = { 'fridge-01': SECRET, 'fridge-02': 'b2'.repeat(32) }) {
-  const t = makeApp();
-  const ctx = t.app.locals.ctx as AppContext;
-  const rt = new RecordingRealtime();
-  ctx.realtime = rt;
-  const published: { topic: string; payload: string }[] = [];
-  ctx.ingest.setPublisher((topic, payload) => published.push({ topic, payload }));
-  for (const [id, secret] of Object.entries(devices)) {
-    t.db.prepare('INSERT INTO fridges (id, name, capacity, created_at) VALUES (?, ?, 20, 0)').run(id, id);
-    t.db
-      .prepare('INSERT INTO devices (device_id, fridge_id, secret_enc, created_at) VALUES (?, ?, ?, 0)')
-      .run(id, id, encryptSecret(secret, t.config.APP_SECRET_KEY));
-  }
-  return { t, ctx, ingest: ctx.ingest as Ingestor, rt, published };
-}
-
-const nonce = () => randomBytes(8).toString('hex');
-function envelope(
-  kind: string,
-  body: object | string,
-  o: { ts?: number; device?: string; secret?: string; nonce?: string } = {},
-): string {
-  const device = o.device ?? 'fridge-01';
-  const ts = o.ts ?? nowS;
-  const n = o.nonce ?? nonce();
-  const b = typeof body === 'string' ? body : JSON.stringify(body);
-  return JSON.stringify({
-    v: 1,
-    device_id: device,
-    kind,
-    ts,
-    nonce: n,
-    body: b,
-    sig: sign(o.secret ?? SECRET, device, kind, ts, n, b),
-  });
-}
-const topic = (kind: string, device = 'fridge-01') => `${PREFIX}/${device}/${kind}`;
-
-const reading = (seq: number, o: Record<string, unknown> = {}) => ({
-  seq, ts: nowS - 3600 + seq * 5, temp: 4.5, door: 0, comp: 1, power: 'MAINS', batt: 100, state: 'SAFE',
-  exp_s: 0, latch: 0, mode: 'model', reason: 'periodic', ...o,
-}); // prettier-ignore
-const telemetry = (seq: number, o: Record<string, unknown> = {}) => ({
-  ...reading(seq, { ts: nowS }),
-  buf: 0,
-  rssi: -60,
-  fw: '1.0.0',
-  ...o,
-});
 
 describe('envelope signing', () => {
   it('matches every shared HMAC vector', () => {

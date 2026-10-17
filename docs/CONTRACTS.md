@@ -96,7 +96,7 @@ All topics except `status`:
 
 ## 6. Core data model (SQLite)
 
-`users`, `devices` (device_id, fridge_id, secret encrypted with `APP_SECRET_KEY`, active), `fridges` (id, name, capacity, latch_state), `readings` (UNIQUE device_id + seq), `events`, `batches` (id, public_token, name, manufacturer, lot_number, quantity, expiry_date, criticality 1–3, status, weighted_exposure_s, discarded_at, acknowledged_by, acknowledged_at, created_by, deleted_at), `batch_assignments` (batch_id, fridge_id, from_ts, to_ts), `alerts`, `nonces`, `security_events`, `audit_log` (hash chain), `relocation_plans`, `ml_predictions`.
+`users`, `devices` (device_id, fridge_id, secret encrypted with `APP_SECRET_KEY`, active), `fridges` (id, name, capacity, latch_state), `readings` (UNIQUE device_id + seq), `events`, `batches` (id, public_token, name, manufacturer, lot_number, quantity, expiry_date, criticality 1–3, status, exposure_ms (weighted, integer ms; APIs show weighted_exposure_s), discarded_at, acknowledged_by, acknowledged_at, created_by, deleted_at), `batch_assignments` (batch_id, fridge_id, from_ts, to_ts), `alerts`, `nonces`, `security_events`, `audit_log` (hash chain), `relocation_plans`, `ml_predictions`.
 
 ## 7. REST API surface
 
@@ -106,7 +106,7 @@ All topics except `status`:
 | Auth | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` |
 | Users (Admin) | `GET/POST /api/users`, `PATCH/DELETE /api/users/:id` |
 | Fridges | `GET /api/fridges`, `GET /api/fridges/:id`, `GET /api/fridges/:id/readings?from&to&bucket`, `POST /api/fridges/:id/reset-latch` (Admin) |
-| Batches | `GET/POST /api/batches`, `GET/PATCH/DELETE /api/batches/:id` (DELETE: Admin), `POST /api/batches/:id/move`, `GET /api/batches/:id/qr` |
+| Batches | `GET/POST /api/batches`, `GET/PATCH/DELETE /api/batches/:id` (DELETE: Admin), `POST /api/batches/:id/move`, `GET /api/batches/:id/qr`, `GET /api/batches/:id/exposure` |
 | Public | `GET /api/public/batch/:token` (no auth) |
 | Alerts | `GET /api/alerts`, `POST /api/alerts/:id/ack` |
 | Security | `GET /api/security/events` |

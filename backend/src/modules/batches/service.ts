@@ -19,7 +19,7 @@ interface BatchRow {
   expiry_date: string;
   criticality: number;
   status: BatchStatus; // last persisted status: transitions are detected against it
-  weighted_exposure_s: number;
+  exposure_ms: number; // weighted milliseconds (P11)
   discarded_at: number | null;
   acknowledged_by: number | null;
   acknowledged_at: number | null;
@@ -48,7 +48,8 @@ const SELECT = `SELECT b.*, a.fridge_id FROM batches b
 export const newPublicToken = () => randomBytes(9).toString('base64url');
 
 function view(row: BatchRow, nowMs = Date.now()) {
-  const remaining = remainingPct(row.weighted_exposure_s);
+  const weighted = row.exposure_ms / 1000;
+  const remaining = remainingPct(weighted);
   const today = utcToday(nowMs);
   return {
     id: row.id,
@@ -62,9 +63,9 @@ function view(row: BatchRow, nowMs = Date.now()) {
     fridge_id: row.fridge_id,
     status: deriveBatchStatus(remaining, row.expiry_date, row.discarded_at !== null, today),
     expired: row.expiry_date < today,
-    weighted_exposure_s: row.weighted_exposure_s,
+    weighted_exposure_s: weighted,
     remaining_pct: Math.round(remaining * 100) / 100,
-    used_minutes: Math.round((Math.min(row.weighted_exposure_s, BUDGET_S) / 60) * 10) / 10,
+    used_minutes: Math.round((Math.min(weighted, BUDGET_S) / 60) * 10) / 10,
     discarded_at: row.discarded_at,
     acknowledged_by: row.acknowledged_by,
     acknowledged_at: row.acknowledged_at,
