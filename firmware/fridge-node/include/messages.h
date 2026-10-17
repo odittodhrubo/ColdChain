@@ -1,6 +1,7 @@
 // Message bodies and the signed envelope (contract: docs/CONTRACTS.md sections 3-5). Pure, native-tested.
 // The body is serialised once, signed, and embedded as a JSON string; it is never re-serialised after signing.
 #pragma once
+#include <ArduinoJson.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -27,9 +28,14 @@ struct Reading {
 struct LiveExtras {
   uint32_t buf;
   int rssi;
+  uint32_t dropped;  // readings lost to buffer overflow; sent as "dropped" only when > 0
 };
 
 namespace msg {
+
+// Write a reading / event into an existing JSON object (live body or sync chunk item).
+void fillReading(JsonObject o, const Reading& r, const LiveExtras* live);
+void fillEvent(JsonObject o, uint32_t seq, uint32_t ts, const char* type, const char* data_json);
 
 // Each returns the length written (excluding NUL), or 0 if out is too small.
 size_t telemetryBody(const Reading& r, const LiveExtras* live, char* out, size_t cap);

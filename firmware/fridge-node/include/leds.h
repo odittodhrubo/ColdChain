@@ -22,4 +22,5 @@ void begin();
 void update(FridgeState s, uint32_t now_ms);
 void setLatch(bool on);
 bool latch();
+void off();  // DEAD battery: every status LED dark
 }  // namespace leds

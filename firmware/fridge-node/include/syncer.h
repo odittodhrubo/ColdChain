@@ -1,0 +1,42 @@
+// Ordered, duplicate-free delivery of the offline buffer (contract: sync / ack). Pure, native-tested.
+// Stop-and-wait: one chunk (<= SYNC_CHUNK oldest entries) in flight. Entries are freed only when a verified
+// ack {"seq_upto":N} arrives, never before. No ack within SYNC_ACK_TIMEOUT_MS: resend the same chunk (the caller
+// signs every send with a fresh ts and nonce, so a retry is never a REPLAY). After SYNC_MAX_RETRIES the sender
+// backs off for SYNC_BACKOFF_MS. Exactly-once = at-least-once delivery here + dedupe on (device_id, seq) at the server.
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+
+#include "ringbuf.h"
+
+class Syncer {
+ public:
+  explicit Syncer(RingBuffer& buf) : buf_(buf) {}
+
+  // True when the current chunk should be sent (first send or retry). Call every loop.
+  bool due(uint32_t now_ms, bool uplink);
+  size_t chunkSize() const;   // entries in the current chunk, oldest first
+  void sent(uint32_t now_ms);  // the chunk was published
+
+  // Verified ack. Frees entries <= seq_upto. Returns false for a stale ack (below the oldest entry).
+  bool onAck(uint32_t seq_upto);
+
+  void restart();  // SYNC_REQUEST: resend from the oldest unacked entry now
+
+  bool waiting() const { return waiting_; }
+  uint32_t retries() const { return retries_; }
+  uint32_t ackedUpTo() const { return acked_; }
+
+ private:
+  RingBuffer& buf_;
+  bool waiting_ = false;
+  bool backoff_ = false;
+  uint32_t sentAt_ = 0;
+  uint32_t backoffAt_ = 0;
+  uint32_t retries_ = 0;
+  uint32_t acked_ = 0;
+};
+
+// {"from_seq":..,"to_seq":..,"readings":[...]} for the first n buffered entries. Event entries become event
+// bodies ({"seq","ts","type","data":{}}) inside the same array (contract section 5).
+size_t syncBody(const RingBuffer& buf, size_t n, char* out, size_t cap);

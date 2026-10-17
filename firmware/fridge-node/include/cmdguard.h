@@ -1,4 +1,4 @@
-// Verification of signed server -> device envelopes (cmd now, ack in P05). Pure, native-tested.
+// Verification of signed server -> device envelopes (cmd and sync ack). Pure, native-tested.
 // Checks, in order: clock valid, JSON + fields, device_id and kind, |now - ts| <= HMAC_WINDOW_S, HMAC (constant
 // time), nonce unseen in the last NONCE_RING messages. A nonce is remembered only after its HMAC verified, so
 // forged messages cannot evict real nonces. Stale replays are caught by the timestamp window, fresh ones by the ring.

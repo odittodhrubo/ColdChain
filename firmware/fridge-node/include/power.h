@@ -1,0 +1,44 @@
+// Power-failure simulation and battery model (device half of Task 3). Pure, native-tested.
+// MAINS <-> BATTERY is toggled by the power-fail button (or follows a mains-sense input on real hardware).
+// On BATTERY the battery drains BATT_DRAIN_PER_MIN; on MAINS it recharges BATT_CHARGE_PER_MIN. At 0 % the node
+// is DEAD (display off, no publishing, relay off) until mains returns.
+#pragma once
+#include <stdint.h>
+
+class PowerModel {
+ public:
+  struct Events {
+    bool powerFail = false;     // MAINS -> BATTERY
+    bool powerRestore = false;  // BATTERY -> MAINS
+    bool battLow = false;       // crossed BATT_LOW_PCT, once per discharge
+    bool died = false;          // reached 0 %
+    bool revived = false;       // mains back after DEAD
+  };
+
+  // on_battery: the requested source (button toggle state or mains-sense level). dt_s: real seconds.
+  Events update(bool on_battery, float dt_s);
+
+  bool onBattery() const { return battery_; }
+  bool dead() const { return dead_; }
+  uint8_t pct() const { return static_cast<uint8_t>(pct_ + 0.5f); }
+  float pctExact() const { return pct_; }
+
+ private:
+  float pct_ = 100.0f;
+  bool battery_ = false;
+  bool dead_ = false;
+  bool lowSent_ = false;
+};
+
+// Door open longer than DOOR_ALARM_S: alarm until the door closes, reported once per episode.
+class DoorAlarm {
+ public:
+  // Returns true exactly once per episode, when the alarm starts.
+  bool update(bool door_open, uint32_t now_ms);
+  bool active() const { return active_; }
+
+ private:
+  bool open_ = false;
+  bool active_ = false;
+  uint32_t openedAt_ = 0;
+};

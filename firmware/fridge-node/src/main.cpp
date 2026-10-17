@@ -1,5 +1,5 @@
 // ColdChain fridge node: local control loop (P02), signed MQTT uplink (P03), heat budget, DISCARD latch and
-// signed commands (P04).
+// signed commands (P04), power failure, offline buffer + sync and door alarm (P05).
 // Cooperative scheduler on millis(): every task checks its own period with unsigned subtraction, nothing blocks,
 // so the compressor logic keeps running whatever else happens. No delay() anywhere in loop(). Networking runs in
 // its own task (net.cpp), so a slow broker or Wi-Fi loss never stalls this loop.
@@ -22,6 +22,7 @@
 #include "net.h"
 #include "node_config.h"
 #include "pins.h"
+#include "power.h"
 #include "sensors.h"
 #include "status.h"
 #include "thermal_model.h"
@@ -40,11 +41,15 @@ constexpr uint32_t BUZZER_TEST_MS = 1000;
 ThermalModel model;
 CompressorControl comp;
 HeatKeeper heat(nvs::store());
+PowerModel power;
+DoorAlarm doorAlarm;
 
 int8_t doorOverride = -1;  // console "door open|close": -1 = follow the switch; cleared when the switch moves
 float temp = NAN;
 bool sensorFault = false;
 FridgeState state = FridgeState::SAFE;
+bool batteryRequested = false;  // power-fail button toggle (or the mains-sense level on real hardware)
+bool wifiOutage = false;        // Wi-Fi outage button toggle
 
 bool lastDoor = false;  // door state last reported, so a console override also produces an event
 uint32_t lastStepAt = 0, lastSampleAt = 0, lastLineAt = 0, lastTelemetryAt = 0, loopStartAt = 0, lastHeatAt = 0;
@@ -59,10 +64,10 @@ void driveCompressor(bool on) {
 
 void event(const char* type, const char* data_json = nullptr) { uplink::event(type, data_json); }
 
-// seq and ts are filled in by the uplink when the reading is sent.
+// seq and ts are filled in by the uplink when the reading is sent or buffered.
 Reading reading(bool doorReason) {
-  return {0, 0, sensorFault ? NAN : temp, doorOpen(), comp.on(), false, 100, state, heat.expS(), heat.latched(),
-          inputs::manualMode(), doorReason};
+  return {0,           0,           sensorFault ? NAN : temp, doorOpen(),     comp.on(), power.onBattery(),
+          power.pct(), state,       heat.expS(),              heat.latched(), inputs::manualMode(), doorReason};
 }
 
 // Budget exhausted or SET_LATCH: red solid, one long beep, LATCH_SET. Already persisted by HeatKeeper.
@@ -97,7 +102,7 @@ bool runDeviceCommand(CmdType type, char* detail, size_t cap) {
       snprintf(detail, cap, "beeped %lu ms", static_cast<unsigned long>(BUZZER_TEST_MS));
       return true;
     case CmdType::SYNC_REQUEST:
-      snprintf(detail, cap, "nothing buffered");  // the offline buffer arrives in P05
+      uplink::restartSync(detail, cap);
       return true;
     case CmdType::UNKNOWN:
       break;
@@ -106,13 +111,52 @@ bool runDeviceCommand(CmdType type, char* detail, size_t cap) {
   return false;
 }
 
+void applyOutage() {
+  net::setOutage(wifiOutage || power.dead());  // a DEAD node has no radio either
+}
+
+// Battery at 0 %: display, LEDs, buzzer and publishing stop; the relay is already off (forced off on battery).
+// The fridge keeps warming: the thermal model keeps running.
+void enterDead() {
+  Serial.println("[power] battery empty: node DEAD until mains returns");
+  uplink::shutdown();
+  applyOutage();
+  display::setPower(false);
+  leds::off();
+  buzzer::silence();
+}
+
+void leaveDead() {
+  Serial.println("[power] mains back: node revives");
+  display::setPower(true);
+  applyOutage();
+  lastHeatAt = millis();  // the node was off: no exposure was measured while DEAD
+  event("BOOT", "{\"fw\":\"1.0.0\",\"revived\":true}");  // seq continues from the persisted value
+}
+
+void updatePower(float dt_s) {
+  const PowerModel::Events ev = power.update(batteryRequested, dt_s);
+  if (ev.powerFail) event("POWER_FAIL");
+  if (ev.revived) leaveDead();
+  if (ev.powerRestore) event("POWER_RESTORE");
+  if (ev.battLow) {
+    char data[24];
+    snprintf(data, sizeof data, "{\"batt\":%u}", power.pct());
+    event("BATT_LOW", data);
+  }
+  if (ev.died) enterDead();
+}
+
 void printLine() {
-  Serial.printf("[%lus] %s %s T=%.2fC %s door=%s comp=%s%s exp=%lus (%.0f%%)%s eff=%.2f speed=x%.1f loop_max=%lums\n",
-                static_cast<unsigned long>(millis() / 1000), FRIDGE_ID, inputs::manualMode() ? "MANUAL" : "MODEL",
-                temp, sensorFault ? "SENSOR_FAULT" : stateName(state), doorOpen() ? "OPEN" : "CLOSED",
-                comp.on() ? "ON" : "OFF", comp.waitingMinOff(millis()) ? "(min-off)" : "",
-                static_cast<unsigned long>(heat.expS()), heat.remainingPct(), heat.latched() ? " DISCARD" : "",
-                model.efficiency(), model.speed(), static_cast<unsigned long>(loopMaxMs));
+  Serial.printf(
+      "[%lus] %s %s T=%.2fC %s door=%s comp=%s%s exp=%lus (%.0f%%)%s pwr=%s %u%% buf=%lu eff=%.2f speed=x%.1f "
+      "loop_max=%lums\n",
+      static_cast<unsigned long>(millis() / 1000), FRIDGE_ID, inputs::manualMode() ? "MANUAL" : "MODEL", temp,
+      sensorFault ? "SENSOR_FAULT" : stateName(state), doorOpen() ? "OPEN" : "CLOSED", comp.on() ? "ON" : "OFF",
+      comp.waitingMinOff(millis()) ? "(min-off)" : "", static_cast<unsigned long>(heat.expS()), heat.remainingPct(),
+      heat.latched() ? " DISCARD" : "", power.dead() ? "DEAD" : power.onBattery() ? "BATTERY" : "MAINS", power.pct(),
+      static_cast<unsigned long>(uplink::bufferedCount()), model.efficiency(), model.speed(),
+      static_cast<unsigned long>(loopMaxMs));
 }
 
 void printStatus() {
@@ -123,7 +167,11 @@ void printStatus() {
   Serial.printf("state      %s  latch %s\n", stateName(state), heat.latched() ? "ON (DISCARD)" : "off");
   Serial.printf("budget     exp_s %lu / %lu  remaining %.1f%%%s\n", static_cast<unsigned long>(heat.expS()),
                 static_cast<unsigned long>(cc::BUDGET_S), heat.remainingPct(), heat.atRisk() ? "  AT RISK" : "");
-  Serial.printf("door       %s%s\n", doorOpen() ? "OPEN" : "CLOSED", doorOverride >= 0 ? " (console override)" : "");
+  Serial.printf("door       %s%s%s\n", doorOpen() ? "OPEN" : "CLOSED", doorOverride >= 0 ? " (console override)" : "",
+                doorAlarm.active() ? "  ALARM" : "");
+  Serial.printf("power      %s  battery %.1f%%  wifi outage %s\n",
+                power.dead() ? "DEAD" : power.onBattery() ? "BATTERY" : "MAINS", power.pctExact(),
+                wifiOutage ? "ON" : "off");
   Serial.printf("compressor %s%s  (ON >= %.1f C, OFF <= %.1f C, min off %lus)\n", comp.on() ? "ON" : "OFF",
                 comp.waitingMinOff(millis()) ? " waiting min-off" : "", cc::COMP_ON_AT_C, cc::COMP_OFF_AT_C,
                 static_cast<unsigned long>(cc::COMP_MIN_OFF_S));
@@ -216,10 +264,12 @@ void sample(uint32_t now) {
   if (heat.update(temp, sensorFault, dt, now)) latchSet("budget");
 
   const FridgeState prev = state;
-  state = classify(temp, doorOpen(), /*on_battery=*/false, sensorFault);  // battery arrives in P05
+  state = classify(temp, doorOpen(), power.onBattery(), sensorFault);
   if (state != prev) Serial.printf("[state] %s -> %s\n", stateName(prev), stateName(state));
 
-  if (comp.update(temp, sensorFault, /*force_off=*/false, now)) {  // power-fail force-off arrives in P05
+  // A small battery cannot run the compressor. The forced OFF also restarts the 60 s min-off timer, so a
+  // flapping power button cannot short-cycle it.
+  if (comp.update(temp, sensorFault, power.onBattery(), now)) {
     driveCompressor(comp.on());
     event(comp.on() ? "COMP_ON" : "COMP_OFF");
   }
@@ -245,7 +295,7 @@ void setup() {
   sensors::begin();
   if (!display::begin(FRIDGE_ID)) Serial.printf("[oled] SSD1306 not found at 0x%02X\n", OLED_I2C_ADDR);
   uplink::onCommand(runDeviceCommand);
-  uplink::begin(FRIDGE_ID);  // BOOT is sent once the clock is valid and the broker is reachable
+  uplink::begin(FRIDGE_ID);  // BOOT is sent (or buffered) once the clock is valid
   printHelp();
 
   lastStepAt = millis();
@@ -258,22 +308,43 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
   loopStartAt = now;
+  const float dt = (now - lastStepAt) / 1000.0f;
 
   const InputEvents ev = inputs::poll(now);
   if (ev.doorChanged) doorOverride = -1;
   if (ev.modeChanged) Serial.printf("[mode] %s\n", inputs::manualMode() ? "MANUAL (DS18B20)" : "MODEL");
-  if (ev.powerPressed) Serial.println("[input] power-fail button (MAINS/BATTERY simulation arrives in P05)");
-  if (ev.wifiPressed) Serial.println("[input] Wi-Fi outage button (outage simulation arrives in P05)");
+#if POWER_SENSE_IS_LEVEL
+  batteryRequested = inputs::powerPinLow();  // real hardware: mains-sense divider on GPIO32
+#else
+  if (ev.powerPressed) batteryRequested = !batteryRequested;
+#endif
+  if (ev.wifiPressed) {
+    wifiOutage = !wifiOutage;
+    Serial.printf("[wifi] simulated outage %s\n", wifiOutage ? "ON" : "OFF");
+    applyOutage();
+  }
   pollConsole();
+  updatePower(dt);
 
-  // The model always runs, so switching back from manual mode continues from a physical temperature.
-  model.step((now - lastStepAt) / 1000.0f, doorOpen(), comp.on());
+  // The model always runs, even when the node is DEAD: the fridge keeps warming without the compressor.
+  model.step(dt, doorOpen(), comp.on());
   lastStepAt = now;
-  sensors::update(now);
 
+  if (power.dead()) {
+    // Unpowered node: nothing measured, shown or sent. Keep forcing the compressor off so the 60 s min-off
+    // counts from the moment power returns.
+    if (now - lastSampleAt >= SAMPLE_MS) {
+      lastSampleAt = now;
+      comp.update(temp, false, true, now);
+    }
+    lastDoor = doorOpen();
+    return;
+  }
+
+  sensors::update(now);
   const bool door = doorOpen();
   const bool doorChanged = door != lastDoor;
-  if (now - lastSampleAt >= SAMPLE_MS || doorChanged || ev.modeChanged) {
+  if (now - lastSampleAt >= SAMPLE_MS || doorChanged || ev.modeChanged || ev.powerPressed) {
     lastSampleAt = now;
     sample(now);
   }
@@ -288,14 +359,16 @@ void loop() {
     uplink::telemetry(reading(false));
     lastTelemetryAt = now;
   }
+  if (doorAlarm.update(door, now)) event("DOOR_ALARM");  // once per episode; the server sends the alert (P12)
+  buzzer::setAlarm(doorAlarm.active());                  // 200 ms on / off until the door closes
   uplink::poll(now);
 
   leds::update(state, now);
   buzzer::update(now);
   const net::Status st = net::status();
-  display::update({state, temp, sensorFault, door, comp.on(), false, 100, inputs::manualMode(), st.wifi, st.mqtt,
-                   uplink::lastSeq(), uplink::footerNote(), heat.latched(), heat.atRisk(),
-                   static_cast<uint8_t>(heat.remainingPct())},
+  display::update({state, temp, sensorFault, door, comp.on(), power.onBattery(), power.pct(), inputs::manualMode(),
+                   st.wifi, st.mqtt, uplink::lastSeq(), uplink::footerNote(), heat.latched(), heat.atRisk(),
+                   static_cast<uint8_t>(heat.remainingPct()), doorAlarm.active()},
                   now);
 
   if (now - lastLineAt >= cfg::STATUS_LINE_MS) {

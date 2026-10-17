@@ -45,5 +45,4 @@
 
 // Power-fail input. 0 = simulator push button that toggles MAINS/BATTERY (Wokwi).
 // 1 = real mains-sense level on GPIO32 (HIGH = mains present), e.g. a 10k/20k divider from the 5 V adapter rail.
-// Honoured by the firmware from P05.
 // #define POWER_SENSE_IS_LEVEL 1

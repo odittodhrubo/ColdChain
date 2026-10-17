@@ -41,6 +41,12 @@ void beep(uint32_t ms) {
 
 void setAlarm(bool on) { alarmActive = on; }
 
+void silence() {
+  beepMs = 0;
+  alarmActive = false;
+  sound(false);
+}
+
 void update(uint32_t now_ms) {
   const bool beeping = beepMs && now_ms - beepStart < beepMs;
   if (!beeping) beepMs = 0;

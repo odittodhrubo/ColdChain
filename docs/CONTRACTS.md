@@ -87,8 +87,9 @@ All topics except `status`:
 
 - **telemetry:** `{"seq":int,"ts":int,"temp":float,"door":0|1,"comp":0|1,"power":"MAINS"|"BATTERY","batt":int,"state":"SAFE|WARNING|BREACH","exp_s":int,"latch":0|1,"mode":"model|manual","buf":int,"rssi":int,"fw":"1.0.0","reason":"periodic|door"}`
 - **event:** `{"seq":int,"ts":int,"type":"DOOR_OPEN|DOOR_CLOSE|DOOR_ALARM|POWER_FAIL|POWER_RESTORE|BATT_LOW|COMP_ON|COMP_OFF|LATCH_SET|LATCH_RESET|WIFI_LOST|WIFI_BACK|SENSOR_FAULT|BOOT","data":{}}`
-- **sync:** `{"from_seq":int,"to_seq":int,"readings":[<telemetry body without "buf","rssi","fw">...]}`, ordered oldest → newest, at most `SYNC_CHUNK` readings.
-- **ack** (server → device): `{"seq_upto":int}` = highest contiguous seq stored.
+- **telemetry** may also carry `"dropped":int` (readings lost to an offline-buffer overflow). It is present only when > 0.
+- **sync:** `{"from_seq":int,"to_seq":int,"readings":[<telemetry body without "buf","rssi","fw">...]}`, ordered oldest → newest, at most `SYNC_CHUNK` items. Events raised while offline share the same seq counter, so they travel in the same array as event bodies (`{"seq","ts","type","data":{}}`, recognised by the `type` key; buffered events keep type, seq and ts, not `data`). `from_seq`/`to_seq` are the first and last item's seq.
+- **ack** (server → device): `{"seq_upto":int}` = highest contiguous seq stored. After storing every item of a chunk (duplicates ignored via `UNIQUE(device_id, seq)`), the server acks at least that chunk's `to_seq`, idempotently: a resent chunk gets the same ack again, never an error. The device frees buffered items with `seq <= seq_upto`, never earlier, and ignores an ack below its oldest buffered seq. Acks are signed with the device secret and verified like commands (timestamp window, HMAC, nonce).
 - **cmd** (server → device): `{"cmd_id":"uuid","type":"RESET_LATCH|SET_LATCH|BUZZER_TEST|SYNC_REQUEST","args":{}}`
 - **cmdack:** `{"cmd_id":"uuid","ok":true,"detail":"..."}`
 - `seq` is one monotonically increasing counter per device across telemetry and events, persisted in NVS so it survives reboot.

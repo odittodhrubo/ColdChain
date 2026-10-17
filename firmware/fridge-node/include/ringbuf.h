@@ -1,0 +1,57 @@
+// Offline store-and-forward buffer: BUFFER_CAPACITY (720 = 60 min at 5 s) binary entries of 16 bytes each,
+// ~11.5 kB of RAM. Serialising to JSON happens only at send time (a JSON entry would be ~170 B and exhaust the heap).
+// Readings and events share the buffer because they share one seq counter. Oldest entries are overwritten only
+// when full, and each overwrite is counted. Pure, native-tested.
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+
+#include "constants.h"
+#include "messages.h"
+
+struct BufEntry {
+  uint32_t seq;
+  uint32_t ts;
+  int16_t temp_c100;  // temperature x 100; INT16_MIN = sensor fault (null)
+  uint16_t exp_s;     // saturates at 65535
+  uint8_t batt;
+  uint8_t code;  // FridgeState for a reading, event type index for an event
+  uint8_t flags;
+  uint8_t reserved;
+};
+static_assert(sizeof(BufEntry) == 16, "BufEntry must stay 16 bytes");
+
+namespace bufflag {
+constexpr uint8_t DOOR = 1 << 0, COMP = 1 << 1, BATTERY = 1 << 2, LATCH = 1 << 3, MANUAL = 1 << 4,
+                  REASON_DOOR = 1 << 5, EVENT = 1 << 6;
+}
+
+// Event types (contract section 5) in a fixed order; the index is stored in BufEntry::code.
+constexpr const char* EVENT_TYPES[] = {"DOOR_OPEN",   "DOOR_CLOSE", "DOOR_ALARM", "POWER_FAIL",   "POWER_RESTORE",
+                                       "BATT_LOW",    "COMP_ON",    "COMP_OFF",   "LATCH_SET",    "LATCH_RESET",
+                                       "WIFI_LOST",   "WIFI_BACK",  "SENSOR_FAULT", "BOOT"};
+constexpr size_t EVENT_TYPE_COUNT = sizeof(EVENT_TYPES) / sizeof(EVENT_TYPES[0]);
+int eventCode(const char* type);  // -1 if unknown
+
+BufEntry packReading(const Reading& r);
+BufEntry packEvent(uint32_t seq, uint32_t ts, int code);
+Reading unpackReading(const BufEntry& e);
+inline bool isEvent(const BufEntry& e) { return e.flags & bufflag::EVENT; }
+
+class RingBuffer {
+ public:
+  static constexpr size_t CAPACITY = cc::BUFFER_CAPACITY;
+
+  void push(const BufEntry& e);  // overwrites the oldest entry when full (dropped++)
+  size_t size() const { return count_; }
+  bool empty() const { return count_ == 0; }
+  const BufEntry& at(size_t i) const { return items_[(head_ + i) % CAPACITY]; }  // 0 = oldest
+  size_t freeUpTo(uint32_t seq);  // drop entries with seq <= seq (after an ack); returns how many
+  uint32_t dropped() const { return dropped_; }
+
+ private:
+  BufEntry items_[CAPACITY];
+  size_t head_ = 0;
+  size_t count_ = 0;
+  uint32_t dropped_ = 0;
+};

@@ -34,5 +34,6 @@ InputEvents poll(uint32_t now_ms) {
 
 bool doorOpen() { return door.level(); }
 bool manualMode() { return mode.level(); }
+bool powerPinLow() { return powerBtn.level(); }
 
 }  // namespace inputs

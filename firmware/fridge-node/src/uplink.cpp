@@ -7,8 +7,10 @@
 #include "crypto.h"
 #include "kv.h"
 #include "net.h"
+#include "ringbuf.h"
 #include "seqstore.h"
 #include "settings.h"
+#include "syncer.h"
 #include "test_vectors.h"
 
 namespace {
@@ -25,23 +27,25 @@ bool enabled = false;
 const char* disabledNote = nullptr;
 
 SeqStore seq(nvs::store());
+RingBuffer buffer;  // 720 x 16 B, static: never on the heap
+Syncer syncer(buffer);
 
 char tTelemetry[96], tEvent[96], tSync[96], tAck[96], tCmd[96], tCmdack[96], tStatus[96];
 
-// Shared scratch, used only from the loop task. 8 kB fits a full sync chunk envelope (P05).
-char body[4096];
+// Shared scratch, used only from the loop task. A full 25-entry sync body is < 5 kB, its envelope < 6 kB.
+char body[6144];
 char envelope[8192];
 bool lastSent = false;
 const char* lastKind = "";
 
 EnvelopeGuard* guard = nullptr;
 uplink::CommandHandler handler = nullptr;
-uint32_t rejected = 0;
+uint32_t rejected = 0, rejectedAcks = 0;
 
 bool bootPending = true;
-bool wifiBackPending = false;
-bool wifiSeenUp = false;
-uint32_t sent = 0, skippedOffline = 0, tooBig = 0;
+bool wasUp = false, everUp = false;
+uint32_t sent = 0, buffered = 0, noClock = 0, tooBig = 0;
+char footer[24];
 
 bool selfTest() {
   for (size_t i = 0; i < vectors::HMAC_COUNT; i++) {
@@ -57,7 +61,8 @@ bool selfTest() {
   return true;
 }
 
-// Signs body as `kind` and publishes it on `topic`. The envelope stays in `envelope` for `dump`.
+// Signs body as `kind` (fresh ts + nonce every call, so a retry is never a replay) and publishes it.
+// The envelope stays in `envelope` for `dump`.
 bool sendSigned(const char* kind, const char* topic, const char* bodyStr) {
   char nonce[17];
   msg::nonceHex(esp_random(), esp_random(), nonce);
@@ -77,9 +82,34 @@ bool sendSigned(const char* kind, const char* topic, const char* bodyStr) {
   return lastSent;
 }
 
-void sendEvent(const char* type, const char* data_json) {
-  if (!msg::eventBody(seq.next(), net::nowUnix(), type, data_json, body, sizeof body)) return;
-  sendSigned("event", tEvent, body);
+// Live when the uplink is up and the publish succeeds; otherwise into the offline buffer with the same seq.
+void deliverReading(Reading& r) {
+  if (net::uplink()) {
+    const LiveExtras live{static_cast<uint32_t>(buffer.size()), net::status().rssi, buffer.dropped()};
+    if (msg::telemetryBody(r, &live, body, sizeof body) && sendSigned("telemetry", tTelemetry, body)) return;
+  }
+  buffer.push(packReading(r));
+  buffered++;
+}
+
+void deliverEvent(uint32_t s, uint32_t ts, const char* type, const char* data_json) {
+  if (net::uplink() && msg::eventBody(s, ts, type, data_json, body, sizeof body) && sendSigned("event", tEvent, body))
+    return;
+  const int code = eventCode(type);
+  if (code < 0) return;
+  buffer.push(packEvent(s, ts, code));  // buffered events keep type, seq and ts; data is not stored
+  buffered++;
+}
+
+// Reading time needs a valid clock: before the first NTP sync there is no ts to give it, so it is dropped.
+bool stamp(uint32_t& s, uint32_t& ts) {
+  ts = net::nowUnix();
+  if (!enabled || ts == 0) {
+    noClock++;
+    return false;
+  }
+  s = seq.next();
+  return true;
 }
 
 void reply(const char* cmdId, bool ok, const char* detail) {
@@ -109,6 +139,35 @@ void handleCommand(const net::Incoming& in) {
   const bool ok = handler(type, detail, sizeof detail);
   Serial.printf("[cmd] %s %s: %s\n", typeName, ok ? "ok" : "failed", detail);
   reply(cmdId, ok, detail);
+}
+
+// Server ack {"seq_upto":N}, signed with the device secret and checked exactly like a command.
+void handleAck(const net::Incoming& in) {
+  JsonDocument ack;
+  const Verdict v = in.truncated ? Verdict::BAD_FIELDS : guard->verify(in.payload, "ack", net::nowUnix(), ack);
+  if (v != Verdict::OK || !ack["seq_upto"].is<uint32_t>()) {
+    rejectedAcks++;
+    Serial.printf("[ack] rejected: %s\n", v == Verdict::OK ? "BAD_FIELDS" : verdictName(v));
+    return;
+  }
+  const uint32_t upto = ack["seq_upto"];
+  const size_t before = buffer.size();
+  if (syncer.onAck(upto)) {
+    Serial.printf("[ack] seq_upto %lu: freed %u, %u left\n", static_cast<unsigned long>(upto),
+                  static_cast<unsigned>(before - buffer.size()), static_cast<unsigned>(buffer.size()));
+  }
+}
+
+void pumpSync(uint32_t now_ms) {
+  if (!syncer.due(now_ms, net::uplink())) return;
+  const size_t n = syncer.chunkSize();
+  if (syncBody(buffer, n, body, sizeof body)) {
+    sendSigned("sync", tSync, body);
+    Serial.printf("[sync] seq %lu..%lu (%u readings), retry %lu\n", static_cast<unsigned long>(buffer.at(0).seq),
+                  static_cast<unsigned long>(buffer.at(n - 1).seq), static_cast<unsigned>(n),
+                  static_cast<unsigned long>(syncer.retries()));
+  }
+  syncer.sent(now_ms);  // even if the publish failed: the ack timeout drives the retry
 }
 
 }  // namespace
@@ -151,65 +210,76 @@ bool begin(const char* device_id) {
 }
 
 void telemetry(Reading r) {
-  if (!enabled || !net::uplink()) {
-    skippedOffline++;  // P05 buffers these instead
-    return;
-  }
-  r.seq = seq.next();
-  r.ts = net::nowUnix();
-  const net::Status st = net::status();
-  const LiveExtras live{0, st.rssi};
-  if (msg::telemetryBody(r, &live, body, sizeof body)) sendSigned("telemetry", tTelemetry, body);
+  if (stamp(r.seq, r.ts)) deliverReading(r);
 }
 
 void event(const char* type, const char* data_json) {
   Serial.printf("[event] %s\n", type);
-  if (!enabled || !net::uplink()) {
-    skippedOffline++;
-    return;
-  }
-  sendEvent(type, data_json);
+  uint32_t s, ts;
+  if (stamp(s, ts)) deliverEvent(s, ts, type, data_json);
 }
 
-void poll(uint32_t) {
+void poll(uint32_t now_ms) {
   if (!enabled) return;
-  const net::Status st = net::status();
-  if (st.wifi && !wifiSeenUp && !bootPending) wifiBackPending = true;  // a reconnect, not the first connect
-  wifiSeenUp = st.wifi;
 
-  if (net::uplink()) {
-    if (bootPending) {
-      bootPending = false;  // BOOT needs a valid clock, so it goes out on the first connection
-      Serial.println("[event] BOOT");
-      sendEvent("BOOT", "{\"fw\":\"1.0.0\"}");
+  // BOOT needs a valid clock; it is sent (or buffered) as soon as there is one.
+  if (bootPending && net::nowUnix() != 0) {
+    bootPending = false;
+    event("BOOT", "{\"fw\":\"1.0.0\"}");
+  }
+
+  // Uplink = MQTT connected with a valid clock. A Wi-Fi outage and an unreachable broker look the same here.
+  const bool up = net::uplink();
+  if (up != wasUp) {
+    wasUp = up;
+    if (!up) {
+      event("WIFI_LOST");  // goes into the buffer, since the link is down
+    } else if (everUp) {
+      event("WIFI_BACK");
     }
-    if (wifiBackPending) {
-      wifiBackPending = false;
-      Serial.println("[event] WIFI_BACK");
-      sendEvent("WIFI_BACK", nullptr);
-    }
+    everUp = everUp || up;
   }
 
   static net::Incoming in;
   while (net::receive(in)) {
     if (strcmp(in.topic, tCmd) == 0) {
       handleCommand(in);
-    } else {
-      // Sync acks are handled from P05.
-      Serial.printf("[rx] %s %u B\n", in.topic, static_cast<unsigned>(in.len));
+    } else if (strcmp(in.topic, tAck) == 0) {
+      handleAck(in);
     }
+  }
+  pumpSync(now_ms);
+}
+
+void restartSync(char* detail, size_t cap) {
+  syncer.restart();
+  if (buffer.empty()) {
+    snprintf(detail, cap, "nothing buffered");
+  } else {
+    snprintf(detail, cap, "resync from seq %lu (%u buffered)", static_cast<unsigned long>(buffer.at(0).seq),
+             static_cast<unsigned>(buffer.size()));
   }
 }
 
+void shutdown() { seq.flush(); }
+
 void onCommand(CommandHandler h) { handler = h; }
 uint32_t rejectedCmds() { return rejected; }
-
 uint32_t lastSeq() { return seq.last(); }
+uint32_t bufferedCount() { return buffer.size(); }
 
 const char* footerNote() {
   if (disabledNote) return disabledNote;
   const net::Status st = net::status();
-  if (st.wifi && !st.timeValid) return "SYNCING TIME";
+  if (!net::uplink()) {
+    if (st.wifi && !st.timeValid) return "SYNCING TIME";
+    snprintf(footer, sizeof footer, "OFFLINE buf:%u", static_cast<unsigned>(buffer.size()));
+    return footer;
+  }
+  if (!buffer.empty()) {
+    snprintf(footer, sizeof footer, "SYNC buf:%u", static_cast<unsigned>(buffer.size()));
+    return footer;
+  }
   return nullptr;
 }
 
@@ -226,10 +296,15 @@ void printStatus() {
   Serial.printf("network    %s  wifi %s  mqtt %s  time %s  rssi %d dBm%s\n", enabled ? "enabled" : "DISABLED",
                 st.wifi ? "up" : "down", st.mqtt ? "up" : "down", st.timeValid ? "valid" : "SYNCING", st.rssi,
                 st.outage ? "  (simulated outage)" : "");
-  Serial.printf("uplink     seq %lu  sent %lu  skipped offline %lu  too big %lu  rejected_cmds %lu  unix %lu\n",
+  Serial.printf("uplink     seq %lu  sent %lu  buffered %lu  no clock %lu  too big %lu  unix %lu\n",
                 static_cast<unsigned long>(seq.last()), static_cast<unsigned long>(sent),
-                static_cast<unsigned long>(skippedOffline), static_cast<unsigned long>(tooBig),
-                static_cast<unsigned long>(rejected), static_cast<unsigned long>(net::nowUnix()));
+                static_cast<unsigned long>(buffered), static_cast<unsigned long>(noClock),
+                static_cast<unsigned long>(tooBig), static_cast<unsigned long>(net::nowUnix()));
+  Serial.printf("buffer     %u / %u  dropped %lu  sync %s retry %lu  acked up to %lu  rejected_cmds %lu  bad acks %lu\n",
+                static_cast<unsigned>(buffer.size()), static_cast<unsigned>(RingBuffer::CAPACITY),
+                static_cast<unsigned long>(buffer.dropped()), syncer.waiting() ? "waiting" : "idle",
+                static_cast<unsigned long>(syncer.retries()), static_cast<unsigned long>(syncer.ackedUpTo()),
+                static_cast<unsigned long>(rejected), static_cast<unsigned long>(rejectedAcks));
 }
 
 }  // namespace uplink

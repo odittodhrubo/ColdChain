@@ -1,6 +1,6 @@
 # Fridge node firmware
 
-One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02), the signed MQTT uplink (P03), and the heat budget, DISCARD latch and signed commands (P04). Power, offline buffering and the door alarm (P05) build on them.
+One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02), the signed MQTT uplink (P03), the heat budget, DISCARD latch and signed commands (P04), and power failure, offline buffering, sync and the door alarm (P05).
 
 ## Modules
 
@@ -20,6 +20,9 @@ One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This pa
 | heat | `include/heat.h`, `src/heat.cpp` | yes (fake NVS) | weighted exposure, remaining budget, DISCARD latch, NVS persistence |
 | cmdguard | `include/cmdguard.h`, `src/cmdguard.cpp` | yes | verification of signed server-to-device envelopes, nonce ring, command whitelist |
 | buzzer | `include/buzzer.h`, `src/buzzer.cpp` | no | non-blocking beeps and alarm pattern |
+| power | `include/power.h`, `src/power.cpp` | yes | MAINS / BATTERY, battery model, DEAD; door-alarm timer |
+| ringbuf | `include/ringbuf.h`, `src/ringbuf.cpp` | yes | 720 x 16 B offline buffer for readings and events |
+| syncer | `include/syncer.h`, `src/syncer.cpp` | yes | stop-and-wait sync with acks, retries and backoff; sync body |
 | net | `include/net.h`, `src/net.cpp` | no | Wi-Fi, NTP, MQTT in a FreeRTOS task with backoff |
 | uplink | `include/uplink.h`, `src/uplink.cpp` | no | device secret, boot HMAC self-test, signed publishing, inbox, `dump` |
 | settings | `include/settings.h`, `config_check.py` | no | picks `config.h` or the `config.example.h` placeholders |
@@ -40,7 +43,7 @@ The model keeps running in manual mode, so switching back continues from a physi
 
 - ON when `T ≥ 7.0 °C`, OFF when `T ≤ 3.0 °C`.
 - Never ON until 60 s after the last OFF. At boot the timer counts as already satisfied.
-- `force_off` (power failure, from P05) keeps the compressor OFF and re-arms the timer on every call, so the 60 s counts from when power returns.
+- `force_off` (on battery or DEAD, see Power failure) keeps the compressor OFF and re-arms the timer on every call, so the 60 s counts from when power returns.
 - The relay (GPIO16, polarity `RELAY_ACTIVE_HIGH`) and the blue LED are always written together. The relay is driven OFF first thing in `setup()`, so it is never in an undefined state.
 
 With a 60 s minimum off-time the temperature can overshoot above 7 °C while the compressor waits. That is correct behaviour.
@@ -60,10 +63,10 @@ On a fault:
 ```
 FRIDGE-01 SIM      SAFE    header (SIM = thermal model, MAN = DS18B20); inverted video on BREACH
 4.6 °C                     size-2 temperature (--.- on a sensor fault)
-BUDGET 100%                status line: SENSOR FAULT > DISCARD - RESET REQ > AT RISK nn% > BUDGET nn%
+BUDGET 100%                status line: SENSOR FAULT > DOOR OPEN! > DISCARD - RESET REQ > AT RISK nn% > BUDGET nn%
 DOOR:CLOSED COMP:ON
 PWR:MAINS BAT:100%
-WIFI√ MQTT√ SEQ 1234       connectivity (x = down), or SYNCING TIME / HMAC FAIL - OFFLINE / NO SECRET - OFFLINE
+WIFI√ MQTT√ SEQ 1234       connectivity (x = down), or OFFLINE buf:N / SYNC buf:N / SYNCING TIME / HMAC FAIL - OFFLINE / NO SECRET - OFFLINE
 ```
 
 It redraws at 2 Hz, and at once when a discrete field (state, door, compressor, power, mode, fault, Wi-Fi, MQTT, latch, budget %) changes, so a door toggle shows instantly. It never redraws every loop. The I²C clock while drawing is `OLED_I2C_HZ` (800 kHz, about 12 ms per frame; set `400000` in `config.h` for modules that misbehave above spec).
@@ -76,7 +79,7 @@ Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red 
 
 | Command | Effect |
 |---|---|
-| `status` | full state: mode, model/sensor temperatures, door, compressor and min-off wait, efficiency, speed, loop max, free heap (and lowest), Wi-Fi / MQTT / clock, seq and send counters |
+| `status` | full state: mode, model/sensor temperatures, budget, door and alarm, power and battery, compressor and min-off wait, efficiency, speed, loop max, free heap (and lowest), Wi-Fi / MQTT / clock, seq and send counters, buffer fill / dropped / sync state |
 | `dump` | the last envelope built, in full, to paste into backend tests. Check it with `node tools/gen_vectors.js --verify envelope.json --secret <device secret>` |
 | `set temp X` | set the model temperature (−40…60 °C) |
 | `set eff X` | compressor efficiency 0…2 (1 = healthy; 0.4 cannot hold 8 °C, used for the P17 health demo) |
@@ -92,7 +95,7 @@ Every 5 s the node prints one line, for example:
 [125s] fridge-01 MODEL T=6.41C SAFE door=CLOSED comp=OFF eff=1.00 speed=x1.0 loop_max=13ms
 ```
 
-Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`, `WIFI_BACK`) and state changes print as `[event] …` and `[state] …` lines. Every publish prints a `[tx]` line with its size and the first 4 signature characters. The power-fail and Wi-Fi buttons are debounced and reported now; their behaviour arrives in P05.
+Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`, `WIFI_BACK`) and state changes print as `[event] …` and `[state] …` lines. Every publish prints a `[tx]` line with its size and the first 4 signature characters. The power-fail and Wi-Fi outage buttons toggle on each debounced press (see below).
 
 All four inputs use a 30 ms debounce (`cfg::DEBOUNCE_MS`). Typical mechanical bounce is under 10 ms. On real hardware, run the `hw-smoke` sketch, read the largest burst of raw transitions, and raise the value if a burst is longer.
 
@@ -127,9 +130,35 @@ Anything else is dropped and counted (`rejected_cmds` in `status`) with its reas
 | `RESET_LATCH` | clear the latch, zero `exp_s`, persist, `LATCH_RESET` |
 | `SET_LATCH` | latch exactly as if the budget ran out (red solid, beep, `LATCH_SET` with `reason:"command"`, persisted) |
 | `BUZZER_TEST` | beep for 1 s |
-| `SYNC_REQUEST` | restart the offline sync from the last acked seq (P05); acks `nothing buffered` until then |
+| `SYNC_REQUEST` | restart the offline sync from the oldest unacked buffered entry; the cmdack says from which seq, or `nothing buffered` |
 
 `-DDEBUG_UNSIGNED_CMDS` adds the console `cmd …` shortcut, which bypasses signatures. It is off by default and must never ship.
+
+## Power failure
+
+The **POWER FAIL** button (GPIO32) toggles MAINS ↔ BATTERY. On real hardware, `#define POWER_SENSE_IS_LEVEL 1` in `config.h` makes GPIO32 a mains-sense input instead (HIGH = mains present, e.g. a 10 k / 20 k divider from the 5 V adapter rail).
+
+- **On BATTERY:** the compressor is forced OFF (a small battery cannot run it), status is at least WARNING, the OLED shows `PWR:BATTERY BAT:nn%`, and `POWER_FAIL` / `POWER_RESTORE` events are sent. The forced OFF keeps re-arming the 60 s min-off timer, so after power returns the compressor waits at least 60 s and a flapping button cannot short-cycle it.
+- **Battery model:** starts at 100 %, drains `BATT_DRAIN_PCT_PER_MIN` (default 2; demo builds pass `-DBATT_DRAIN_PCT_PER_MIN=6`) on battery, and recharges 5 %/min on mains. At ≤ 20 % `BATT_LOW` is sent once per discharge.
+- **DEAD at 0 %:** OLED off, LEDs and buzzer off, radio off, nothing published, relay off; the exact seq is saved to NVS. The thermal model keeps running (the fridge physically warms). No exposure is counted while DEAD, because an unpowered node cannot measure; the server integrates the gap conservatively (contract §2). When mains returns the node revives: `BOOT` (`"revived":true`), seq continues from the persisted value, and the temperature is *not* reset.
+- Telemetry carries `power` and `batt` in every reading.
+
+## Offline buffer and sync
+
+The **WI-FI OUTAGE** button (GPIO33) toggles a simulated outage: Wi-Fi disconnects and refuses to reconnect. A real outage (broker unreachable, Wi-Fi gone) behaves identically, because both are just "uplink down". Uplink means MQTT connected with a valid clock.
+
+- **Events:** `WIFI_LOST` (buffered, since the link is down) and `WIFI_BACK` on recovery.
+- **Buffer:** while the uplink is down, or when a publish fails, every reading and event goes into a ring buffer of `BUFFER_CAPACITY = 720` entries (60 min at 5 s; the requirement is ≥ 30 min = 360). Each entry is 16 bytes of binary (seq, ts, temp × 100, exp_s, batt, state or event type, flags), ~11.5 kB in total, and is serialised to JSON only when sent. When full, the oldest entry is overwritten and counted; the next live telemetry reports `"dropped":N`. Readings created before the clock was ever valid have no timestamp and are dropped (counted as `no clock`); once NTP has synced, the clock keeps running through outages.
+- **Sync on reconnect:** stop-and-wait, oldest first. The node sends one `sync` chunk of at most 25 items (`from_seq` / `to_seq`, fresh `ts` and `nonce`), then waits for the server's signed ack `{"seq_upto":N}`. The ack is verified like a command (window, HMAC, nonce). Then entries ≤ N are freed and the next chunk goes. With no ack within 5 s the same chunk is resent; after 5 retries the sender backs off for 60 s. **Entries are never freed before an ack.** A late duplicate ack (below the oldest buffered seq) is ignored. Events buffered offline travel in the same array as event bodies (contract §5).
+- **Live telemetry continues during sync** with higher seqs; the server orders by seq, so nothing overtakes the buffered data.
+- `SYNC_REQUEST` restarts the sync from the oldest unacked entry.
+- Exactly-once is at-least-once delivery from the node plus dedupe on `(device_id, seq)` at the server.
+
+The OLED footer shows `OFFLINE buf:N` while down and `SYNC buf:N` while draining. The video walkthrough is in [`wokwi/scenarios/offline.md`](../firmware/fridge-node/wokwi/scenarios/offline.md).
+
+## Door alarm
+
+If the door stays open for more than `DOOR_ALARM_S` (60 s): the buzzer beeps 200 ms on / 200 ms off until the door closes, the OLED status line shows `DOOR OPEN!`, and one `DOOR_ALARM` event is sent per episode (buffered if offline, and flagged late by the server). The server sends the SMS / Telegram / email alert (P12). Closing the door silences the buzzer and sends `DOOR_CLOSE`. On battery with the door open, the thermal model applies both effects.
 
 ## Networking
 
@@ -165,7 +194,7 @@ Wi-Fi and MQTT reconnect with exponential backoff, 1 s doubling to 30 s; Wi-Fi a
 ### Messages
 
 - **Telemetry** every `TELEMETRY_PERIOD_S` (5 s), plus immediately with `reason:"door"` and a `DOOR_OPEN` / `DOOR_CLOSE` event on every door change, including a console override. Bodies follow contract §5 exactly. `temp` has two decimals and is `null` on a sensor fault; `exp_s` and `latch` come from the heat budget.
-- **Events:** `BOOT` goes out on the first connection with a valid clock. `WIFI_BACK` goes out after a reconnect (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
+- **Events:** `BOOT` is created as soon as the clock is valid (sent, or buffered if the broker is not reachable yet). `WIFI_LOST` / `WIFI_BACK` follow the uplink going down and coming back (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
 - **Envelope** exactly as contract §4: the body is serialised once, signed, then embedded as a JSON string and never re-serialised. `nonce` is 16 hex chars from two `esp_random()` words. `ts` is the send time.
 - `seq` is one counter for telemetry and events. It is written to NVS every 20 increments, and on boot the stored value jumps by 20, so a crash can never make the node reuse a seq.
 
@@ -176,7 +205,7 @@ Before networking starts, the node signs every HMAC vector from `contracts/test_
 ### Security notes
 
 - The secret is never printed. Logs show only the first 4 signature characters; `dump` prints a full envelope (signature included) on request.
-- PubSubClient publishes at QoS 0 only, so delivery is not guaranteed. Reliability for buffered data comes from application-level acks (P05).
+- PubSubClient publishes at QoS 0 only, so delivery is not guaranteed. Reliability for buffered data comes from the application-level acks above. A failed live publish falls back to the buffer.
 
 ## Tests
 
@@ -194,4 +223,5 @@ pio test -e native
 | `test_crypto` | RFC 4231 HMAC case, all 5 shared HMAC vectors, envelope round-trip keeps the exact body, buffer too small, constant-time compare, telemetry body byte-identical to the shared vector, sync-reading shape with `null` temp, event body, topics, nonce |
 | `test_seqstore` | monotonic seq, NVS written every 20 increments, crash + reboot never reuses a seq, flush |
 | `test_heat` | all 8 shared exposure vectors, 60 s at 9 °C = 60 and at 13 °C = 120, weights at 8.0 / 12.0, fault counts ×1, AT RISK then a single LATCH_SET, latch and `exp_s` survive reboot, at most 30 s lost on a crash, NVS writes throttled, reset, SET_LATCH persists |
+| `test_offline` | 16-byte entry round trip, 360 readings kept and capacity 720, overflow drops oldest and counts, free only up to the ack, events in sync chunks, a worst-case 25-item chunk fits the 6 kB body and 8 kB MQTT buffers, sync over a link losing 30 % of chunks and acks (20 seeds, 4-minute outage) and a full 30-minute outage with every seq delivered once and in order, retry cadence and backoff, stale ack ignored, SYNC_REQUEST, battery drain / BATT_LOW once / DEAD / revive / recharge, door alarm after > 60 s once per episode |
 | `test_cmdguard` | acceptance matrix: valid, no clock, ±30 s window, bad signature, tampered body, flipped sig char, replay of the exact bytes, forgeries do not burn nonces, 32-entry ring, wrong device / kind, malformed, unknown type |

@@ -25,7 +25,7 @@ bool discreteChanged(const DisplayData& a, const DisplayData& b) {
   return a.state != b.state || a.sensorFault != b.sensorFault || a.doorOpen != b.doorOpen || a.compOn != b.compOn ||
          a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode || a.wifi != b.wifi ||
          a.mqtt != b.mqtt || a.netNote != b.netNote || a.latch != b.latch || a.atRisk != b.atRisk ||
-         a.budgetPct != b.budgetPct;
+         a.budgetPct != b.budgetPct || a.doorAlarm != b.doorAlarm;
 }
 
 void draw(const DisplayData& d) {
@@ -59,6 +59,8 @@ void draw(const DisplayData& d) {
   oled.setCursor(0, 31);
   if (d.sensorFault) {
     oled.print("SENSOR FAULT");
+  } else if (d.doorAlarm) {
+    oled.print("DOOR OPEN!");
   } else if (d.latch) {
     oled.print("DISCARD - RESET REQ");
   } else if (d.atRisk) {
@@ -98,6 +100,12 @@ bool begin(const char* fridge_id) {
   oled.clearDisplay();
   oled.display();
   return true;
+}
+
+void setPower(bool on) {
+  if (!ok) return;
+  oled.ssd1306_command(on ? SSD1306_DISPLAYON : SSD1306_DISPLAYOFF);
+  if (on) drawnOnce = false;  // redraw at the next update
 }
 
 void update(const DisplayData& d, uint32_t now_ms) {

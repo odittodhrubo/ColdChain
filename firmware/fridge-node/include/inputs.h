@@ -41,4 +41,5 @@ void begin();
 InputEvents poll(uint32_t now_ms);
 bool doorOpen();
 bool manualMode();  // mode switch ON = manual DS18B20, OFF = thermal model
+bool powerPinLow();  // debounced GPIO32 level: real mains-sense mode (POWER_SENSE_IS_LEVEL), LOW = no mains
 }  // namespace inputs

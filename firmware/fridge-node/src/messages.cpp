@@ -17,40 +17,56 @@ size_t finish(const JsonDocument& doc, char* out, size_t cap) {
 
 namespace msg {
 
+void fillReading(JsonObject o, const Reading& r, const LiveExtras* live) {
+  o["seq"] = r.seq;
+  o["ts"] = r.ts;
+  if (isnan(r.temp)) {
+    o["temp"] = nullptr;
+  } else {
+    char temp[12];
+    snprintf(temp, sizeof temp, "%.2f", r.temp);  // fixed 2 decimals, no float-printing surprises
+    o["temp"] = serialized(static_cast<char*>(temp));  // char* (not const char*) makes ArduinoJson copy it
+  }
+  o["door"] = r.doorOpen ? 1 : 0;
+  o["comp"] = r.compOn ? 1 : 0;
+  o["power"] = r.onBattery ? "BATTERY" : "MAINS";
+  o["batt"] = r.battPct;
+  o["state"] = stateName(r.state);
+  o["exp_s"] = r.expS;
+  o["latch"] = r.latch ? 1 : 0;
+  o["mode"] = r.manualMode ? "manual" : "model";
+  if (live) {
+    o["buf"] = live->buf;
+    o["rssi"] = live->rssi;
+    o["fw"] = FW_VERSION;
+    if (live->dropped) o["dropped"] = live->dropped;  // only after a buffer overflow
+  }
+  o["reason"] = r.doorReason ? "door" : "periodic";
+}
+
+void fillEvent(JsonObject o, uint32_t seq, uint32_t ts, const char* type, const char* data_json) {
+  o["seq"] = seq;
+  o["ts"] = ts;
+  o["type"] = type;
+  if (data_json && *data_json) {
+    char data[96];
+    strncpy(data, data_json, sizeof data - 1);
+    data[sizeof data - 1] = '\0';
+    o["data"] = serialized(static_cast<char*>(data));
+  } else {
+    o["data"].to<JsonObject>();  // {}
+  }
+}
+
 size_t telemetryBody(const Reading& r, const LiveExtras* live, char* out, size_t cap) {
   JsonDocument doc;
-  char temp[12];
-  doc["seq"] = r.seq;
-  doc["ts"] = r.ts;
-  if (isnan(r.temp)) {
-    doc["temp"] = nullptr;
-  } else {
-    snprintf(temp, sizeof temp, "%.2f", r.temp);  // fixed 2 decimals, no float-printing surprises
-    doc["temp"] = serialized(static_cast<const char*>(temp));
-  }
-  doc["door"] = r.doorOpen ? 1 : 0;
-  doc["comp"] = r.compOn ? 1 : 0;
-  doc["power"] = r.onBattery ? "BATTERY" : "MAINS";
-  doc["batt"] = r.battPct;
-  doc["state"] = stateName(r.state);
-  doc["exp_s"] = r.expS;
-  doc["latch"] = r.latch ? 1 : 0;
-  doc["mode"] = r.manualMode ? "manual" : "model";
-  if (live) {
-    doc["buf"] = live->buf;
-    doc["rssi"] = live->rssi;
-    doc["fw"] = FW_VERSION;
-  }
-  doc["reason"] = r.doorReason ? "door" : "periodic";
+  fillReading(doc.to<JsonObject>(), r, live);
   return finish(doc, out, cap);
 }
 
 size_t eventBody(uint32_t seq, uint32_t ts, const char* type, const char* data_json, char* out, size_t cap) {
   JsonDocument doc;
-  doc["seq"] = seq;
-  doc["ts"] = ts;
-  doc["type"] = type;
-  doc["data"] = serialized(data_json && *data_json ? data_json : "{}");
+  fillEvent(doc.to<JsonObject>(), seq, ts, type, data_json);
   return finish(doc, out, cap);
 }
 
