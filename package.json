@@ -8,8 +8,8 @@
   "scripts": {
     "setup": "npm --prefix backend install && npm --prefix frontend install",
     "env:init": "node tools/init_env.js",
-    "gen": "python tools/gen_constants.py && node tools/gen_vectors.js",
-    "check:gen": "python tools/gen_constants.py --check && node tools/gen_vectors.js --check",
+    "gen": "python tools/gen_constants.py && node tools/gen_vectors.js && python tools/gen_wokwi.py",
+    "check:gen": "python tools/gen_constants.py --check && node tools/gen_vectors.js --check && python tools/gen_wokwi.py --check",
     "test": "node tools/test_all.js",
     "lint": "npm --prefix backend run lint && npm --prefix frontend run lint && ruff check ml tools",
     "format": "npm --prefix backend run format && npm --prefix frontend run format && ruff format ml tools",

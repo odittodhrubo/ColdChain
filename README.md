@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P00 scaffold**. Services expose health endpoints only; features land prompt by prompt (P01–P21).
+> Status: **P01 Wokwi hardware**. Services expose health endpoints only; features land prompt by prompt (P02–P21).
 
 ## Architecture
 
@@ -38,14 +38,14 @@ Wokwi's simulated Wi-Fi (`Wokwi-GUEST`) reaches the public internet but **not** 
 
 | Path | What |
 |---|---|
-| `firmware/fridge-node/` | PlatformIO project (ESP32, Arduino). Envs `fridge-01`, `fridge-02`, `native` (unit tests) |
+| `firmware/fridge-node/` | PlatformIO project (ESP32, Arduino). Envs `fridge-01`, `fridge-02`, `hw-smoke` (wiring test), `native` (unit tests). Wokwi projects in `wokwi/` |
 | `backend/` | Node 20 + TypeScript + Express API (`GET /api/health`) |
 | `frontend/` | React 18 + Vite + TypeScript + Tailwind |
 | `ml/` | FastAPI service (`GET /health`) |
 | `tools/` | Python package `coldchain_tools`, constant/vector generators, test runner |
 | `contracts/` | `constants.json` and `test_vectors.json`: the single source of truth |
 | `infra/` | Docker Compose and Mosquitto config |
-| `docs/` | [Shared contracts](docs/CONTRACTS.md) and, later, hardware, API, security and AI docs |
+| `docs/` | [Shared contracts](docs/CONTRACTS.md), [hardware](docs/hardware.md) and, later, API, security and AI docs |
 
 ## Prerequisites
 
@@ -137,7 +137,7 @@ Test vectors (5 HMAC, 12 status, 8 exposure) are computed by `node tools/gen_vec
 
 ## Engineering conventions
 
-- Secrets are never committed. `.env` and firmware `config.h` are git-ignored; `.env.example` (and firmware `config.example.h`, added in P03) hold placeholders only.
+- Secrets are never committed. `.env` and firmware `config.h` are git-ignored; `.env.example` and firmware `config.example.h` hold placeholders only.
 - No `delay()` in firmware loops. Everything is `millis()`-based and non-blocking.
 - Every prompt ends with tests that run in one command.
 
