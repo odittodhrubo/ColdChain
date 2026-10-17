@@ -21,6 +21,7 @@ const pio = quoted(venvBin('pio')) ?? ['pio', 'platformio'].find(has);
 const suites = [
   ['contracts: generated constants fresh', `${py} tools/gen_constants.py --check`, root],
   ['contracts: test vectors fresh', 'node tools/gen_vectors.js --check', root],
+  ['firmware: Wokwi projects fresh', `${py} tools/gen_wokwi.py --check`, root],
   ['backend', 'npm test', path.join(root, 'backend')],
   ['frontend', 'npm test', path.join(root, 'frontend')],
   ['ml', `${py} -m pytest -q`, path.join(root, 'ml')],

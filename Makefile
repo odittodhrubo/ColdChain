@@ -13,13 +13,15 @@ setup:            ## install node deps and the python venv
 env:              ## create .env with generated secrets
 	npm run env:init
 
-gen:              ## regenerate constants + test vectors from contracts/
+gen:              ## regenerate constants, test vectors and Wokwi projects
 	$(PY) tools/gen_constants.py
 	node tools/gen_vectors.js
+	$(PY) tools/gen_wokwi.py
 
 check:            ## fail if generated files are stale
 	$(PY) tools/gen_constants.py --check
 	node tools/gen_vectors.js --check
+	$(PY) tools/gen_wokwi.py --check
 
 up:
 	$(COMPOSE) up -d --build
