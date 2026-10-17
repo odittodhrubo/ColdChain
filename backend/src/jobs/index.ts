@@ -22,6 +22,8 @@ export function startJobs(ctx: AppContext): () => void {
     setInterval(() => void anchorAudit(ctx), ANCHOR_EVERY_MS),
     setInterval(() => ctx.ingest.tick(), 1000), // seq-gap SYNC_REQUEST, offline watchdog
     setInterval(() => ctx.heat.tick(), 10_000), // exposure over data holes that were never synced
+    setInterval(() => ctx.alerts.tick(), 5000), // door escalation, re-notification, flood windows
+    setInterval(() => ctx.commands.sweep(), 30_000), // untracked commands without cmdack -> TIMEOUT
     setInterval(() => ctx.ingest.purgeNonces(), 60_000), // nonces only matter for NONCE_TTL_S
     setInterval(() => refreshAllStatuses(ctx), 10 * 60_000), // expiry turns batches DISCARD at UTC midnight
   ];
@@ -29,6 +31,7 @@ export function startJobs(ctx: AppContext): () => void {
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation
   return () => {
     timers.forEach(clearInterval);
+    ctx.commands.stop();
     ctx.audit.flushRejects(Date.now(), true);
     ctx.audit.flush();
   };

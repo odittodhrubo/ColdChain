@@ -109,6 +109,7 @@ All topics except `status`:
 | Batches | `GET/POST /api/batches`, `GET/PATCH/DELETE /api/batches/:id` (DELETE: Admin), `POST /api/batches/:id/move`, `GET /api/batches/:id/qr`, `GET /api/batches/:id/exposure` |
 | Public | `GET /api/public/batch/:token` (no auth) |
 | Alerts | `GET /api/alerts`, `POST /api/alerts/:id/ack` |
+| Devices | `POST /api/fridges/:id/buzzer-test` (Admin, Pharmacist), `GET /api/commands/:id` |
 | Security | `GET /api/security/events` |
 | Audit | `GET /api/audit`, `GET /api/audit/verify` |
 | AI | `GET /api/ml/predictions/:fridgeId`, `GET /api/ml/report` |

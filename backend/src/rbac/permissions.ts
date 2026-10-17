@@ -12,6 +12,7 @@ export const PERMISSIONS = {
   'batch:delete': ['ADMIN'], // soft-delete an emptied batch (P10: Admin only, quantity 0)
   'relocation:confirm': ['ADMIN', 'PHARMACIST'],
   'alert:ack': ['ADMIN', 'PHARMACIST'],
+  'device:test': ['ADMIN', 'PHARMACIST'], // "Test buzzer" (P12)
   'latch:reset': ['ADMIN'], // reset red latch, discard acknowledgement
   'user:manage': ['ADMIN'],
   'audit:read': ALL, // security events and audit log (read-only for Pharmacist and Inspector)

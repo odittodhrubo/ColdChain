@@ -3,7 +3,26 @@ import { can, PERMISSIONS, ROLES, type Role } from '../src/rbac/permissions';
 import type { RouteDef } from '../src/shared/http';
 import { type BatchInput, createBatch } from '../src/modules/batches/service';
 import type { AppContext } from '../src/shared/http';
+import { encryptSecret } from '../src/shared/secretbox';
 import { addFridge, addUser, batchInput, bearer, makeApp, PASSWORD, tokenFor, type TestApp } from './helpers';
+
+const ctxOf = (t: TestApp) => t.app.locals.ctx as AppContext;
+/** A fridge with an active device (secret encrypted like the seed does). */
+function fridgeWithDevice(t: TestApp) {
+  const f = addFridge(t);
+  t.db
+    .prepare('INSERT INTO devices (device_id, fridge_id, secret_enc, created_at) VALUES (?, ?, ?, 0)')
+    .run(`dev-${f}`, f, encryptSecret('ab'.repeat(32), t.config.APP_SECRET_KEY));
+  return f;
+}
+const newAlert = (t: TestApp) =>
+  ctxOf(t).alerts.raise({
+    type: 'FRIDGE_OFFLINE',
+    severity: 'WARNING',
+    fridgeId: addFridge(t),
+    title: 'x',
+    lines: [],
+  });
 
 const newBatch = (t: TestApp, over: Record<string, unknown> = {}) =>
   createBatch(t.app.locals.ctx as AppContext, batchInput(addFridge(t), over) as BatchInput);
@@ -53,6 +72,14 @@ const EXAMPLES: Record<string, Example> = {
     path: `/api/fridges/${addFridge(t)}/reset-latch`,
     body: { reason: 'disposed of the discarded vials' },
   }),
+  'GET /api/alerts': async () => ({ path: '/api/alerts?status=active&severity=WARNING' }),
+  'POST /api/alerts/:id/ack': async (t) => ({ path: `/api/alerts/${newAlert(t).id}/ack` }),
+  'POST /api/fridges/:id/buzzer-test': async (t) => ({
+    path: `/api/fridges/${fridgeWithDevice(t)}/buzzer-test`,
+  }),
+  'GET /api/commands/:id': async (t) => ({
+    path: `/api/commands/${ctxOf(t).commands.send(`dev-${fridgeWithDevice(t)}`, 'BUZZER_TEST')}`,
+  }),
 };
 
 const key = (r: RouteDef) => `${r.method.toUpperCase()} ${r.path}`;
@@ -100,6 +127,7 @@ describe('permission matrix matches Part 3.8', () => {
     expect(roles('batch:delete')).toEqual(['ADMIN']);
     expect(roles('relocation:confirm')).toEqual(['ADMIN', 'PHARMACIST']);
     expect(roles('alert:ack')).toEqual(['ADMIN', 'PHARMACIST']);
+    expect(roles('device:test')).toEqual(['ADMIN', 'PHARMACIST']);
     expect(roles('latch:reset')).toEqual(['ADMIN']);
     expect(roles('user:manage')).toEqual(['ADMIN']);
     expect(roles('audit:read')).toEqual(['ADMIN', 'INSPECTOR', 'PHARMACIST']);

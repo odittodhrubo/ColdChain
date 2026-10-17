@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P11 heat-exposure budget engine** (per-batch 60-minute budget recomputed from readings, At Risk / Discard, red latch, signed admin reset) on top of inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P12–P21).
+> Status: **P12 alerts and device commands** (door, breach, power, offline, batch and flood alerts with dedupe and re-notification over in-app / Telegram / email; signed commands tracked until ack) on top of the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P13–P21).
 
 ## Architecture
 

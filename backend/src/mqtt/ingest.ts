@@ -73,6 +73,8 @@ export interface IngestHooks {
   onReadingsInserted?: (fridgeId: string, readings: StoredReading[], opts: { late: boolean }) => void;
   onDeviceEvent?: (fridgeId: string, event: StoredEvent) => void;
   onDeviceOffline?: (fridgeId: string, deviceId: string, offlineForMs: number) => void;
+  onDeviceOnline?: (fridgeId: string, deviceId: string) => void; // accepted message after OFFLINE
+  onReject?: (deviceId: string | null, reason: RejectReason, nowMs: number) => void; // flood detection (P12)
   onCommandAck?: (deviceId: string, ack: { cmd_id: string; ok: boolean; detail: string }) => void;
 }
 
@@ -418,6 +420,7 @@ export class Ingestor {
     detail?: Record<string, unknown>,
   ) {
     this.metrics.rejected[reason] += 1;
+    this.hooks.onReject?.(deviceId?.slice(0, 64) ?? null, reason, nowMs);
     // Only a hash of the payload is kept: never the payload itself, never a secret.
     const sampleHash = createHash('sha256').update(raw).digest('hex');
     const device = deviceId?.slice(0, 64) ?? null;
@@ -474,6 +477,7 @@ export class Ingestor {
     tr.lastAccepted = nowMs;
     if (tr.offline) {
       tr.offline = tr.offlineAlerted = false;
+      this.hooks.onDeviceOnline?.(fridgeId, deviceId);
       const live = this.live.get(fridgeId);
       if (live)
         this.ctx.realtime.emit('fridge:update', Object.assign(live, { online: true, last_seen: nowMs }));

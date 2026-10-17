@@ -5,6 +5,8 @@ import type { Db } from '../db';
 import type { AuditLog } from '../modules/audit/service';
 import type { BatchView } from '../modules/batches/service';
 import type { HeatEngine } from '../modules/exposure/engine';
+import type { AlertEngine } from '../modules/alerts/service';
+import type { CommandTracker } from '../mqtt/commands';
 import type { Ingestor } from '../mqtt/ingest';
 import type { Realtime } from '../realtime';
 import { can, type Permission, type Role } from '../rbac/permissions';
@@ -39,6 +41,8 @@ export interface AppContext {
   realtime: Realtime; // replaced by Socket.IO in index.ts; silent in tests
   ingest: Ingestor;
   heat: HeatEngine; // heat-exposure budget (P11)
+  alerts: AlertEngine; // alerts and notifications (P12)
+  commands: CommandTracker; // signed device commands tracked until cmdack (P12)
   hooks: AppHooks;
 }
 
