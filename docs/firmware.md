@@ -1,6 +1,6 @@
 # Fridge node firmware
 
-One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02) and the signed MQTT uplink (P03). The heat budget and latch (P04) and power/offline/door-alarm behaviour (P05) build on them.
+One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02), the signed MQTT uplink (P03), and the heat budget, DISCARD latch and signed commands (P04). Power, offline buffering and the door alarm (P05) build on them.
 
 ## Modules
 
@@ -17,6 +17,9 @@ One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This pa
 | crypto | `include/crypto.h`, `src/crypto.cpp` | yes | HMAC-SHA256 (mbedtls on the ESP32, portable SHA-256 in native tests), constant-time compare |
 | messages | `include/messages.h`, `src/messages.cpp` | yes | telemetry / event bodies, signed envelope, topics, nonces |
 | seqstore | `include/seqstore.h`, `src/seqstore.cpp`, `include/kv.h`, `src/nvs_kv.cpp` | yes (fake NVS) | persistent message sequence numbers |
+| heat | `include/heat.h`, `src/heat.cpp` | yes (fake NVS) | weighted exposure, remaining budget, DISCARD latch, NVS persistence |
+| cmdguard | `include/cmdguard.h`, `src/cmdguard.cpp` | yes | verification of signed server-to-device envelopes, nonce ring, command whitelist |
+| buzzer | `include/buzzer.h`, `src/buzzer.cpp` | no | non-blocking beeps and alarm pattern |
 | net | `include/net.h`, `src/net.cpp` | no | Wi-Fi, NTP, MQTT in a FreeRTOS task with backoff |
 | uplink | `include/uplink.h`, `src/uplink.cpp` | no | device secret, boot HMAC self-test, signed publishing, inbox, `dump` |
 | settings | `include/settings.h`, `config_check.py` | no | picks `config.h` or the `config.example.h` placeholders |
@@ -56,17 +59,18 @@ On a fault:
 
 ```
 FRIDGE-01 SIM      SAFE    header (SIM = thermal model, MAN = DS18B20); inverted video on BREACH
-4.6 °C                     size-3 temperature, or SENSOR FAULT
+4.6 °C                     size-2 temperature (--.- on a sensor fault)
+BUDGET 100%                status line: SENSOR FAULT > DISCARD - RESET REQ > AT RISK nn% > BUDGET nn%
 DOOR:CLOSED COMP:ON
 PWR:MAINS BAT:100%
 WIFI√ MQTT√ SEQ 1234       connectivity (x = down), or SYNCING TIME / HMAC FAIL - OFFLINE / NO SECRET - OFFLINE
 ```
 
-It redraws at 2 Hz, and at once when a discrete field (state, door, compressor, power, mode, fault, Wi-Fi, MQTT) changes, so a door toggle shows instantly. It never redraws every loop. The I²C clock while drawing is `OLED_I2C_HZ` (800 kHz, about 12 ms per frame; set `400000` in `config.h` for modules that misbehave above spec).
+It redraws at 2 Hz, and at once when a discrete field (state, door, compressor, power, mode, fault, Wi-Fi, MQTT, latch, budget %) changes, so a door toggle shows instantly. It never redraws every loop. The I²C clock while drawing is `OLED_I2C_HZ` (800 kHz, about 12 ms per frame; set `400000` in `config.h` for modules that misbehave above spec).
 
 ## LEDs
 
-Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red blinking at 1 Hz = BREACH. `leds::setLatch(true)` (wired up in P04) forces red solid and turns green and yellow off. Blue mirrors the compressor relay.
+Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red blinking at 1 Hz = BREACH. The DISCARD latch forces red solid and turns green and yellow off. Blue mirrors the compressor relay.
 
 ## Serial console (115200 baud)
 
@@ -80,6 +84,7 @@ Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red 
 | `door open` / `door close` | override the door switch until the switch next moves |
 | `door auto` | follow the switch again |
 | `help` | list commands |
+| `cmd reset_latch` / `set_latch` / `buzzer_test` / `sync_request` | **debug builds only** (`-DDEBUG_UNSIGNED_CMDS`, off by default): run a command without a signature |
 
 Every 5 s the node prints one line, for example:
 
@@ -90,6 +95,41 @@ Every 5 s the node prints one line, for example:
 Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`, `WIFI_BACK`) and state changes print as `[event] …` and `[state] …` lines. Every publish prints a `[tx]` line with its size and the first 4 signature characters. The power-fail and Wi-Fi buttons are debounced and reported now; their behaviour arrives in P05.
 
 All four inputs use a 30 ms debounce (`cfg::DEBOUNCE_MS`). Typical mechanical bounce is under 10 ms. On real hardware, run the `hw-smoke` sketch, read the largest burst of raw transitions, and raise the value if a burst is longer.
+
+## Heat budget and DISCARD latch
+
+The server tracks the 60-minute budget per vaccine batch and is the source of truth for batch status (P11). The node keeps a **fridge-level worst case**, so the safety indicators work even with no server contact.
+
+- **Exposure:** every 1 s sample adds `dt × weight` weighted seconds, using real elapsed time (not the thermal speed-up): weight 0 up to 8.0 °C, 1 above 8.0 up to 12.0, 2 above 12.0 (contract §2). 60 s at 9 °C adds 60; 60 s at 13 °C adds 120. During a **sensor fault** the temperature is unknown, so it counts as weight 1 (fail-safe: never under-count). Telemetry carries `exp_s`; `remaining_pct = max(0, 100 × (1 − exp_s / 3600))`.
+- **AT RISK:** below 20 % remaining the OLED status line shows `AT RISK nn%` (the yellow LED already shows WARNING while the fridge is warm).
+- **Latch:** at `exp_s ≥ 3600` the node latches: red LED solid, one 1.5 s beep, `LATCH_SET` event (`{"exp_s":…, "reason":"budget"}`), OLED `DISCARD - RESET REQ`. The latch never clears by itself.
+- **Persistence:** `latch` and `exp_s` live in NVS. `exp_s` is written at most every 30 s, plus at once when an excursion starts or ends and on latch changes, so a crash loses at most 30 s of exposure and flash wear stays low. A reboot or power cut comes back latched with the same `exp_s`.
+- **Reset:** only a verified `RESET_LATCH` command clears the latch. It also zeroes `exp_s`, writes NVS and emits `LATCH_RESET`. The admin reset clears the server side too (P11).
+
+Device and server budgets can legitimately differ: the server counts per batch (and only while the batch is in the fridge), the device counts the whole fridge. The device latches when the fridge-level budget is exhausted or when the server sends `SET_LATCH`.
+
+## Signed commands
+
+The node subscribes to `{prefix}/{device_id}/cmd`. A command is accepted only if, in this order:
+
+1. the clock is valid (a command before NTP is **rejected**, never accepted against a wrong clock);
+2. it is valid JSON with all envelope fields (`v`, `device_id`, `kind`, `ts`, `nonce` of 16 chars, `body`, 64-char `sig`);
+3. `device_id` is this node and `kind` is `cmd`;
+4. `|now − ts| ≤ 30 s`;
+5. the HMAC verifies with the device secret (constant-time compare);
+6. the nonce is not among the last 32 accepted (ring cache). A nonce is remembered only after its HMAC verified, so forged messages cannot evict real ones;
+7. `type` is one of `RESET_LATCH`, `SET_LATCH`, `BUZZER_TEST`, `SYNC_REQUEST`.
+
+Anything else is dropped and counted (`rejected_cmds` in `status`) with its reason (`NO_TIME`, `BAD_JSON`, `BAD_FIELDS`, `WRONG_DEVICE`, `WRONG_KIND`, `STALE_TS`, `BAD_SIG`, `REPLAY`). Only authenticated commands get a reply: a signed `cmdack` `{"cmd_id","ok","detail"}`. An authenticated but unknown type gets `ok:false`; a forgery gets nothing, so it learns nothing.
+
+| Command | Effect |
+|---|---|
+| `RESET_LATCH` | clear the latch, zero `exp_s`, persist, `LATCH_RESET` |
+| `SET_LATCH` | latch exactly as if the budget ran out (red solid, beep, `LATCH_SET` with `reason:"command"`, persisted) |
+| `BUZZER_TEST` | beep for 1 s |
+| `SYNC_REQUEST` | restart the offline sync from the last acked seq (P05); acks `nothing buffered` until then |
+
+`-DDEBUG_UNSIGNED_CMDS` adds the console `cmd …` shortcut, which bypasses signatures. It is off by default and must never ship.
 
 ## Networking
 
@@ -124,7 +164,7 @@ Wi-Fi and MQTT reconnect with exponential backoff, 1 s doubling to 30 s; Wi-Fi a
 
 ### Messages
 
-- **Telemetry** every `TELEMETRY_PERIOD_S` (5 s), plus immediately with `reason:"door"` and a `DOOR_OPEN` / `DOOR_CLOSE` event on every door change, including a console override. Bodies follow contract §5 exactly. `temp` has two decimals and is `null` on a sensor fault.
+- **Telemetry** every `TELEMETRY_PERIOD_S` (5 s), plus immediately with `reason:"door"` and a `DOOR_OPEN` / `DOOR_CLOSE` event on every door change, including a console override. Bodies follow contract §5 exactly. `temp` has two decimals and is `null` on a sensor fault; `exp_s` and `latch` come from the heat budget.
 - **Events:** `BOOT` goes out on the first connection with a valid clock. `WIFI_BACK` goes out after a reconnect (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
 - **Envelope** exactly as contract §4: the body is serialised once, signed, then embedded as a JSON string and never re-serialised. `nonce` is 16 hex chars from two `esp_random()` words. `ts` is the send time.
 - `seq` is one counter for telemetry and events. It is written to NVS every 20 increments, and on boot the stored value jumps by 20, so a crash can never make the node reuse a seq.
@@ -153,3 +193,5 @@ pio test -e native
 | `test_ui` | LED pattern per state, 1 Hz blink, latch override, debounce |
 | `test_crypto` | RFC 4231 HMAC case, all 5 shared HMAC vectors, envelope round-trip keeps the exact body, buffer too small, constant-time compare, telemetry body byte-identical to the shared vector, sync-reading shape with `null` temp, event body, topics, nonce |
 | `test_seqstore` | monotonic seq, NVS written every 20 increments, crash + reboot never reuses a seq, flush |
+| `test_heat` | all 8 shared exposure vectors, 60 s at 9 °C = 60 and at 13 °C = 120, weights at 8.0 / 12.0, fault counts ×1, AT RISK then a single LATCH_SET, latch and `exp_s` survive reboot, at most 30 s lost on a crash, NVS writes throttled, reset, SET_LATCH persists |
+| `test_cmdguard` | acceptance matrix: valid, no clock, ±30 s window, bad signature, tampered body, flipped sig char, replay of the exact bytes, forgeries do not burn nonces, 32-entry ring, wrong device / kind, malformed, unknown type |

@@ -211,6 +211,32 @@ const header = [
   '};',
   'constexpr size_t HMAC_COUNT = sizeof(HMAC) / sizeof(HMAC[0]);',
   '',
+  'struct ExposureSample {',
+  '  float dt_s;',
+  '  float temp;',
+  '};',
+  '',
+  ...vectors.exposure.map(
+    (v, i) =>
+      `constexpr ExposureSample EXPOSURE_${i}[] = {${v.samples.map(([dt, t]) => `{${cppFloat(dt)}, ${cppFloat(t)}}`).join(', ')}};`,
+  ),
+  '',
+  'struct ExposureVector {',
+  '  const char* name;',
+  '  const ExposureSample* samples;',
+  '  size_t count;',
+  '  float expected_weighted_s;',
+  '  float expected_remaining_pct;',
+  '};',
+  '',
+  'constexpr ExposureVector EXPOSURE[] = {',
+  ...vectors.exposure.map(
+    (v, i) =>
+      `    {"${v.name}", EXPOSURE_${i}, ${v.samples.length}, ${cppFloat(v.expected_weighted_s)}, ${cppFloat(v.expected_remaining_pct)}},`,
+  ),
+  '};',
+  'constexpr size_t EXPOSURE_COUNT = sizeof(EXPOSURE) / sizeof(EXPOSURE[0]);',
+  '',
   '}  // namespace vectors',
   '',
 ].join('\n');

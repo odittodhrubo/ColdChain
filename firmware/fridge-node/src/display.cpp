@@ -24,7 +24,8 @@ constexpr uint8_t CHECK = 251;   // square-root sign, the closest CP437 glyph to
 bool discreteChanged(const DisplayData& a, const DisplayData& b) {
   return a.state != b.state || a.sensorFault != b.sensorFault || a.doorOpen != b.doorOpen || a.compOn != b.compOn ||
          a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode || a.wifi != b.wifi ||
-         a.mqtt != b.mqtt || a.netNote != b.netNote;
+         a.mqtt != b.mqtt || a.netNote != b.netNote || a.latch != b.latch || a.atRisk != b.atRisk ||
+         a.budgetPct != b.budgetPct;
 }
 
 void draw(const DisplayData& d) {
@@ -42,23 +43,30 @@ void draw(const DisplayData& d) {
   oled.print(word);
   oled.setTextColor(SSD1306_WHITE);
 
+  oled.setTextSize(2);
+  oled.setCursor(0, 13);
   if (d.sensorFault || isnan(d.temp)) {
-    oled.setTextSize(2);
-    oled.setCursor(0, 14);
-    oled.print("SENSOR");
-    oled.setCursor(0, 30);
-    oled.print("FAULT");
+    oled.print("--.-");
   } else {
-    oled.setTextSize(3);
-    oled.setCursor(0, 14);
     oled.printf("%.1f", d.temp);
-    oled.setTextSize(2);
-    oled.setCursor(oled.getCursorX() + 4, 14);
-    oled.write(DEGREE);
-    oled.print("C");
+  }
+  oled.setCursor(oled.getCursorX() + 2, 13);
+  oled.write(DEGREE);
+  oled.print("C");
+
+  // Status line, most urgent first.
+  oled.setTextSize(1);
+  oled.setCursor(0, 31);
+  if (d.sensorFault) {
+    oled.print("SENSOR FAULT");
+  } else if (d.latch) {
+    oled.print("DISCARD - RESET REQ");
+  } else if (d.atRisk) {
+    oled.printf("AT RISK %u%%", d.budgetPct);
+  } else {
+    oled.printf("BUDGET %u%%", d.budgetPct);
   }
 
-  oled.setTextSize(1);
   oled.setCursor(0, 40);
   oled.printf("DOOR:%s COMP:%s", d.doorOpen ? "OPEN" : "CLOSED", d.compOn ? "ON" : "OFF");
   oled.setCursor(0, 48);

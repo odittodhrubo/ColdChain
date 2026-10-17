@@ -93,6 +93,12 @@ void test_event_body() {
   TEST_ASSERT_EQUAL_STRING(vectors::HMAC[1].body, body);
 }
 
+void test_cmdack_body() {
+  char body[128];
+  msg::cmdackBody("abc", true, "latch cleared", body, sizeof body);
+  TEST_ASSERT_EQUAL_STRING("{\"cmd_id\":\"abc\",\"ok\":true,\"detail\":\"latch cleared\"}", body);
+}
+
 void test_topic_and_nonce() {
   char t[96];
   msg::topic("{prefix}/{device_id}/telemetry", "coldchain/v1", "fridge-01", t, sizeof t);
@@ -113,6 +119,7 @@ int main() {
   RUN_TEST(test_telemetry_body_matches_contract_shape);
   RUN_TEST(test_sync_reading_omits_live_fields_and_null_temp);
   RUN_TEST(test_event_body);
+  RUN_TEST(test_cmdack_body);
   RUN_TEST(test_topic_and_nonce);
   return UNITY_END();
 }

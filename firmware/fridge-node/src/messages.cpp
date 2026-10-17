@@ -54,6 +54,14 @@ size_t eventBody(uint32_t seq, uint32_t ts, const char* type, const char* data_j
   return finish(doc, out, cap);
 }
 
+size_t cmdackBody(const char* cmd_id, bool ok, const char* detail, char* out, size_t cap) {
+  JsonDocument doc;
+  doc["cmd_id"] = cmd_id;
+  doc["ok"] = ok;
+  doc["detail"] = detail;
+  return finish(doc, out, cap);
+}
+
 size_t envelope(const char* device_id, const char* secret, const char* kind, uint32_t ts, const char* nonce,
                 const char* body, char* out, size_t cap) {
   char sig[crypto::SIG_HEX_LEN + 1];

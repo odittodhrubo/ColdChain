@@ -58,4 +58,38 @@ constexpr HmacVector HMAC[] = {
 };
 constexpr size_t HMAC_COUNT = sizeof(HMAC) / sizeof(HMAC[0]);
 
+struct ExposureSample {
+  float dt_s;
+  float temp;
+};
+
+constexpr ExposureSample EXPOSURE_0[] = {{600.0f, 5.0f}, {600.0f, 7.9f}};
+constexpr ExposureSample EXPOSURE_1[] = {{300.0f, 8.0f}};
+constexpr ExposureSample EXPOSURE_2[] = {{60.0f, 9.0f}};
+constexpr ExposureSample EXPOSURE_3[] = {{60.0f, 13.0f}};
+constexpr ExposureSample EXPOSURE_4[] = {{100.0f, 12.0f}};
+constexpr ExposureSample EXPOSURE_5[] = {{30.0f, 6.0f}, {120.0f, 8.5f}, {45.0f, 12.5f}, {60.0f, 10.0f}, {30.0f, 4.0f}};
+constexpr ExposureSample EXPOSURE_6[] = {{1500.0f, 13.0f}};
+constexpr ExposureSample EXPOSURE_7[] = {{2000.0f, 13.0f}};
+
+struct ExposureVector {
+  const char* name;
+  const ExposureSample* samples;
+  size_t count;
+  float expected_weighted_s;
+  float expected_remaining_pct;
+};
+
+constexpr ExposureVector EXPOSURE[] = {
+    {"all safe", EXPOSURE_0, 2, 0.0f, 100.0f},
+    {"exactly 8.0 does not count", EXPOSURE_1, 1, 0.0f, 100.0f},
+    {"60 s at 9 C counts x1", EXPOSURE_2, 1, 60.0f, 98.3333f},
+    {"60 s at 13 C counts x2", EXPOSURE_3, 1, 120.0f, 96.6667f},
+    {"exactly 12.0 counts x1", EXPOSURE_4, 1, 100.0f, 97.2222f},
+    {"mixed excursion", EXPOSURE_5, 5, 270.0f, 92.5f},
+    {"crosses into at-risk", EXPOSURE_6, 1, 3000.0f, 16.6667f},
+    {"budget exhausted", EXPOSURE_7, 1, 4000.0f, 0.0f},
+};
+constexpr size_t EXPOSURE_COUNT = sizeof(EXPOSURE) / sizeof(EXPOSURE[0]);
+
 }  // namespace vectors

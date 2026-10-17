@@ -3,9 +3,16 @@
 #pragma once
 #include <stdint.h>
 
+#include <stddef.h>
+
+#include "cmdguard.h"
 #include "messages.h"
 
 namespace uplink {
+
+// Runs a verified, whitelisted command. Writes a short result into detail; returns ok for the cmdack.
+using CommandHandler = bool (*)(CmdType type, char* detail, size_t cap);
+void onCommand(CommandHandler handler);
 
 // Picks this device's secret, runs the HMAC self-test and starts the network task.
 // Returns false when networking is disabled (self-test failed or no secret); control keeps running either way.
@@ -17,8 +24,11 @@ void telemetry(Reading r);
 // Prints and publishes an event with a fresh seq. data_json is a JSON object or nullptr for {}.
 void event(const char* type, const char* data_json = nullptr);
 
-// Call every loop: drains received messages, sends deferred BOOT / WIFI_BACK events.
+// Call every loop: drains received messages (verifies commands, replies on cmdack), sends deferred
+// BOOT / WIFI_BACK events.
 void poll(uint32_t now_ms);
+
+uint32_t rejectedCmds();
 
 uint32_t lastSeq();
 const char* footerNote();  // nullptr = show WIFI/MQTT/SEQ

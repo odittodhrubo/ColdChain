@@ -34,6 +34,10 @@ char envelope[8192];
 bool lastSent = false;
 const char* lastKind = "";
 
+EnvelopeGuard* guard = nullptr;
+uplink::CommandHandler handler = nullptr;
+uint32_t rejected = 0;
+
 bool bootPending = true;
 bool wifiBackPending = false;
 bool wifiSeenUp = false;
@@ -78,6 +82,35 @@ void sendEvent(const char* type, const char* data_json) {
   sendSigned("event", tEvent, body);
 }
 
+void reply(const char* cmdId, bool ok, const char* detail) {
+  if (msg::cmdackBody(cmdId, ok, detail, body, sizeof body)) sendSigned("cmdack", tCmdack, body);
+}
+
+// Only authenticated commands get a cmdack: an attacker learns nothing from a rejected forgery.
+void handleCommand(const net::Incoming& in) {
+  JsonDocument cmd;
+  const Verdict v = in.truncated ? Verdict::BAD_FIELDS : guard->verify(in.payload, "cmd", net::nowUnix(), cmd);
+  const char* cmdId = cmd["cmd_id"];
+  if (v != Verdict::OK || !cmdId) {
+    rejected++;
+    Serial.printf("[cmd] rejected: %s (total %lu)\n", v == Verdict::OK ? "BAD_FIELDS" : verdictName(v),
+                  static_cast<unsigned long>(rejected));
+    return;
+  }
+  const char* typeName = cmd["type"] | "";
+  const CmdType type = parseCmdType(typeName);
+  if (type == CmdType::UNKNOWN || !handler) {
+    rejected++;
+    Serial.printf("[cmd] rejected: type '%s' not allowed (total %lu)\n", typeName, static_cast<unsigned long>(rejected));
+    reply(cmdId, false, "unknown command type");
+    return;
+  }
+  char detail[64] = "";
+  const bool ok = handler(type, detail, sizeof detail);
+  Serial.printf("[cmd] %s %s: %s\n", typeName, ok ? "ok" : "failed", detail);
+  reply(cmdId, ok, detail);
+}
+
 }  // namespace
 
 namespace uplink {
@@ -108,6 +141,8 @@ bool begin(const char* device_id) {
   msg::topic(cc::TOPIC_CMD, MQTT_TOPIC_PREFIX, device_id, tCmd, sizeof tCmd);
   msg::topic(cc::TOPIC_CMDACK, MQTT_TOPIC_PREFIX, device_id, tCmdack, sizeof tCmdack);
   msg::topic(cc::TOPIC_STATUS, MQTT_TOPIC_PREFIX, device_id, tStatus, sizeof tStatus);
+  static EnvelopeGuard g(device_id, secret);
+  guard = &g;
   net::begin(device_id, tStatus, tCmd, tAck);
   Serial.printf("[net] %s -> %s:%d (%s), topics %s/%s/...\n", WIFI_SSID, MQTT_HOST, MQTT_PORT,
                 MQTT_TLS ? "TLS" : "plain", MQTT_TOPIC_PREFIX, device_id);
@@ -157,10 +192,17 @@ void poll(uint32_t) {
 
   static net::Incoming in;
   while (net::receive(in)) {
-    // Commands (P04) and sync acks (P05) are verified and handled there; P03 only subscribes.
-    Serial.printf("[rx] %s %u B%s\n", in.topic, static_cast<unsigned>(in.len), in.truncated ? " (truncated)" : "");
+    if (strcmp(in.topic, tCmd) == 0) {
+      handleCommand(in);
+    } else {
+      // Sync acks are handled from P05.
+      Serial.printf("[rx] %s %u B\n", in.topic, static_cast<unsigned>(in.len));
+    }
   }
 }
+
+void onCommand(CommandHandler h) { handler = h; }
+uint32_t rejectedCmds() { return rejected; }
 
 uint32_t lastSeq() { return seq.last(); }
 
@@ -184,10 +226,10 @@ void printStatus() {
   Serial.printf("network    %s  wifi %s  mqtt %s  time %s  rssi %d dBm%s\n", enabled ? "enabled" : "DISABLED",
                 st.wifi ? "up" : "down", st.mqtt ? "up" : "down", st.timeValid ? "valid" : "SYNCING", st.rssi,
                 st.outage ? "  (simulated outage)" : "");
-  Serial.printf("uplink     seq %lu  sent %lu  skipped offline %lu  too big %lu  unix %lu\n",
+  Serial.printf("uplink     seq %lu  sent %lu  skipped offline %lu  too big %lu  rejected_cmds %lu  unix %lu\n",
                 static_cast<unsigned long>(seq.last()), static_cast<unsigned long>(sent),
                 static_cast<unsigned long>(skippedOffline), static_cast<unsigned long>(tooBig),
-                static_cast<unsigned long>(net::nowUnix()));
+                static_cast<unsigned long>(rejected), static_cast<unsigned long>(net::nowUnix()));
 }
 
 }  // namespace uplink

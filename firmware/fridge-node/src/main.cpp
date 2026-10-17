@@ -1,4 +1,5 @@
-// ColdChain fridge node: local control loop (P02) plus the signed MQTT uplink (P03).
+// ColdChain fridge node: local control loop (P02), signed MQTT uplink (P03), heat budget, DISCARD latch and
+// signed commands (P04).
 // Cooperative scheduler on millis(): every task checks its own period with unsigned subtraction, nothing blocks,
 // so the compressor logic keeps running whatever else happens. No delay() anywhere in loop(). Networking runs in
 // its own task (net.cpp), so a slow broker or Wi-Fi loss never stalls this loop.
@@ -8,10 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "buzzer.h"
+#include "cmdguard.h"
 #include "constants.h"
 #include "control.h"
 #include "display.h"
+#include "heat.h"
 #include "inputs.h"
+#include "kv.h"
 #include "leds.h"
 #include "messages.h"
 #include "net.h"
@@ -29,9 +34,12 @@
 namespace {
 
 constexpr uint32_t SAMPLE_MS = 1000;  // temperature sampling / control decision rate
+constexpr uint32_t LATCH_BEEP_MS = 1500;
+constexpr uint32_t BUZZER_TEST_MS = 1000;
 
 ThermalModel model;
 CompressorControl comp;
+HeatKeeper heat(nvs::store());
 
 int8_t doorOverride = -1;  // console "door open|close": -1 = follow the switch; cleared when the switch moves
 float temp = NAN;
@@ -39,7 +47,7 @@ bool sensorFault = false;
 FridgeState state = FridgeState::SAFE;
 
 bool lastDoor = false;  // door state last reported, so a console override also produces an event
-uint32_t lastStepAt = 0, lastSampleAt = 0, lastLineAt = 0, lastTelemetryAt = 0, loopStartAt = 0;
+uint32_t lastStepAt = 0, lastSampleAt = 0, lastLineAt = 0, lastTelemetryAt = 0, loopStartAt = 0, lastHeatAt = 0;
 uint32_t loopMaxMs = 0;  // worst loop iteration since the last status line
 
 bool doorOpen() { return doorOverride >= 0 ? doorOverride == 1 : inputs::doorOpen(); }
@@ -49,20 +57,62 @@ void driveCompressor(bool on) {
   digitalWrite(pins::PIN_LED_BLUE, on ? HIGH : LOW);  // blue LED always mirrors the relay
 }
 
-void event(const char* type) { uplink::event(type); }
+void event(const char* type, const char* data_json = nullptr) { uplink::event(type, data_json); }
 
 // seq and ts are filled in by the uplink when the reading is sent.
 Reading reading(bool doorReason) {
-  return {0, 0, sensorFault ? NAN : temp, doorOpen(), comp.on(), false, 100, state, 0, leds::latch(),
+  return {0, 0, sensorFault ? NAN : temp, doorOpen(), comp.on(), false, 100, state, heat.expS(), heat.latched(),
           inputs::manualMode(), doorReason};
 }
 
+// Budget exhausted or SET_LATCH: red solid, one long beep, LATCH_SET. Already persisted by HeatKeeper.
+void latchSet(const char* reason) {
+  leds::setLatch(true);
+  buzzer::beep(LATCH_BEEP_MS);
+  char data[64];
+  snprintf(data, sizeof data, "{\"exp_s\":%lu,\"reason\":\"%s\"}", static_cast<unsigned long>(heat.expS()), reason);
+  event("LATCH_SET", data);
+}
+
+// Verified, whitelisted commands from uplink (or the console with -DDEBUG_UNSIGNED_CMDS).
+bool runDeviceCommand(CmdType type, char* detail, size_t cap) {
+  switch (type) {
+    case CmdType::RESET_LATCH: {
+      const bool was = heat.resetLatch();  // zeroes exp_s and writes NVS
+      leds::setLatch(false);
+      event("LATCH_RESET");
+      snprintf(detail, cap, was ? "latch cleared, exp_s reset" : "not latched, exp_s reset");
+      return true;
+    }
+    case CmdType::SET_LATCH:
+      if (heat.setLatch()) {
+        latchSet("command");
+        snprintf(detail, cap, "latch set");
+      } else {
+        snprintf(detail, cap, "already latched");
+      }
+      return true;
+    case CmdType::BUZZER_TEST:
+      buzzer::beep(BUZZER_TEST_MS);
+      snprintf(detail, cap, "beeped %lu ms", static_cast<unsigned long>(BUZZER_TEST_MS));
+      return true;
+    case CmdType::SYNC_REQUEST:
+      snprintf(detail, cap, "nothing buffered");  // the offline buffer arrives in P05
+      return true;
+    case CmdType::UNKNOWN:
+      break;
+  }
+  snprintf(detail, cap, "unknown command type");
+  return false;
+}
+
 void printLine() {
-  Serial.printf("[%lus] %s %s T=%.2fC %s door=%s comp=%s%s eff=%.2f speed=x%.1f loop_max=%lums\n",
+  Serial.printf("[%lus] %s %s T=%.2fC %s door=%s comp=%s%s exp=%lus (%.0f%%)%s eff=%.2f speed=x%.1f loop_max=%lums\n",
                 static_cast<unsigned long>(millis() / 1000), FRIDGE_ID, inputs::manualMode() ? "MANUAL" : "MODEL",
                 temp, sensorFault ? "SENSOR_FAULT" : stateName(state), doorOpen() ? "OPEN" : "CLOSED",
-                comp.on() ? "ON" : "OFF", comp.waitingMinOff(millis()) ? "(min-off)" : "", model.efficiency(),
-                model.speed(), static_cast<unsigned long>(loopMaxMs));
+                comp.on() ? "ON" : "OFF", comp.waitingMinOff(millis()) ? "(min-off)" : "",
+                static_cast<unsigned long>(heat.expS()), heat.remainingPct(), heat.latched() ? " DISCARD" : "",
+                model.efficiency(), model.speed(), static_cast<unsigned long>(loopMaxMs));
 }
 
 void printStatus() {
@@ -70,7 +120,9 @@ void printStatus() {
   Serial.printf("mode       %s\n", inputs::manualMode() ? "MANUAL (DS18B20)" : "MODEL (thermal simulation)");
   Serial.printf("temp       %.2f C  model %.2f C  sensor %.2f C%s\n", temp, model.trueTemp(), sensors::tempC(),
                 sensors::fault() ? " (fault)" : "");
-  Serial.printf("state      %s  latch %s\n", stateName(state), leds::latch() ? "ON" : "off");
+  Serial.printf("state      %s  latch %s\n", stateName(state), heat.latched() ? "ON (DISCARD)" : "off");
+  Serial.printf("budget     exp_s %lu / %lu  remaining %.1f%%%s\n", static_cast<unsigned long>(heat.expS()),
+                static_cast<unsigned long>(cc::BUDGET_S), heat.remainingPct(), heat.atRisk() ? "  AT RISK" : "");
   Serial.printf("door       %s%s\n", doorOpen() ? "OPEN" : "CLOSED", doorOverride >= 0 ? " (console override)" : "");
   Serial.printf("compressor %s%s  (ON >= %.1f C, OFF <= %.1f C, min off %lus)\n", comp.on() ? "ON" : "OFF",
                 comp.waitingMinOff(millis()) ? " waiting min-off" : "", cc::COMP_ON_AT_C, cc::COMP_OFF_AT_C,
@@ -83,6 +135,9 @@ void printStatus() {
 
 void printHelp() {
   Serial.println("commands: status | dump | set temp X | set eff X | set speed X | door open|close|auto | help");
+#ifdef DEBUG_UNSIGNED_CMDS
+  Serial.println("debug:    cmd reset_latch|set_latch|buzzer_test|sync_request  (UNSIGNED, debug build only)");
+#endif
 }
 
 bool parseFloat(const char* s, float& out) {
@@ -115,6 +170,16 @@ void runCommand(char* line) {
     Serial.println("door follows the switch");
   } else if (strcmp(line, "help") == 0) {
     printHelp();
+#ifdef DEBUG_UNSIGNED_CMDS
+  } else if (strncmp(line, "cmd ", 4) == 0) {
+    // Bypasses signature checks: compiled in only with -DDEBUG_UNSIGNED_CMDS, never in a normal build.
+    char upper[24] = "";
+    for (size_t i = 0; line[4 + i] && i < sizeof upper - 1; i++) upper[i] = toupper(line[4 + i]);
+    char detail[64];
+    const CmdType type = parseCmdType(upper);
+    const bool ok = runDeviceCommand(type, detail, sizeof detail);
+    Serial.printf("[cmd] UNSIGNED %s %s: %s\n", upper, ok ? "ok" : "failed", detail);
+#endif
   } else {
     Serial.printf("unknown or out-of-range command: '%s'\n", line);
     printHelp();
@@ -145,6 +210,11 @@ void sample(uint32_t now) {
   sensorFault = fault;
   temp = manual ? sensors::tempC() : model.read();
 
+  // Exposure counts real elapsed time (not the thermal speed-up): a sample stands for the time since the last.
+  const float dt = (now - lastHeatAt) / 1000.0f;
+  lastHeatAt = now;
+  if (heat.update(temp, sensorFault, dt, now)) latchSet("budget");
+
   const FridgeState prev = state;
   state = classify(temp, doorOpen(), /*on_battery=*/false, sensorFault);  // battery arrives in P05
   if (state != prev) Serial.printf("[state] %s -> %s\n", stateName(prev), stateName(state));
@@ -162,20 +232,24 @@ void setup() {
   Serial.begin(115200);
   pinMode(pins::PIN_RELAY, OUTPUT);
   pinMode(pins::PIN_LED_BLUE, OUTPUT);
-  pinMode(pins::PIN_BUZZER, OUTPUT);
-  digitalWrite(pins::PIN_BUZZER, LOW);
   driveCompressor(false);  // defined relay state before anything else runs
+  buzzer::begin();
 
   Serial.printf("\nColdChain node %s fw 1.0.0 booting\n", FRIDGE_ID);
   model = ThermalModel(esp_random());
   inputs::begin();
   leds::begin();
+  heat.begin();  // a latched node comes back latched after any reboot or power cut
+  leds::setLatch(heat.latched());
+  Serial.printf("[heat] exp_s %lu, latch %s\n", static_cast<unsigned long>(heat.expS()), heat.latched() ? "ON" : "off");
   sensors::begin();
   if (!display::begin(FRIDGE_ID)) Serial.printf("[oled] SSD1306 not found at 0x%02X\n", OLED_I2C_ADDR);
+  uplink::onCommand(runDeviceCommand);
   uplink::begin(FRIDGE_ID);  // BOOT is sent once the clock is valid and the broker is reachable
   printHelp();
 
   lastStepAt = millis();
+  lastHeatAt = lastStepAt;
   sample(lastStepAt);
   lastSampleAt = lastStepAt;
   lastDoor = doorOpen();
@@ -217,9 +291,11 @@ void loop() {
   uplink::poll(now);
 
   leds::update(state, now);
+  buzzer::update(now);
   const net::Status st = net::status();
   display::update({state, temp, sensorFault, door, comp.on(), false, 100, inputs::manualMode(), st.wifi, st.mqtt,
-                   uplink::lastSeq(), uplink::footerNote()},
+                   uplink::lastSeq(), uplink::footerNote(), heat.latched(), heat.atRisk(),
+                   static_cast<uint8_t>(heat.remainingPct())},
                   now);
 
   if (now - lastLineAt >= cfg::STATUS_LINE_MS) {

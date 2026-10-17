@@ -34,6 +34,7 @@ namespace msg {
 // Each returns the length written (excluding NUL), or 0 if out is too small.
 size_t telemetryBody(const Reading& r, const LiveExtras* live, char* out, size_t cap);
 size_t eventBody(uint32_t seq, uint32_t ts, const char* type, const char* data_json, char* out, size_t cap);
+size_t cmdackBody(const char* cmd_id, bool ok, const char* detail, char* out, size_t cap);
 size_t envelope(const char* device_id, const char* secret, const char* kind, uint32_t ts, const char* nonce,
                 const char* body, char* out, size_t cap);
 
