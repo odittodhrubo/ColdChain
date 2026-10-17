@@ -1,6 +1,6 @@
 # Fridge node firmware
 
-One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02). Networking (P03), the heat budget and latch (P04), and power/offline/door-alarm behaviour (P05) build on it.
+One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This page covers the local control loop (P02) and the signed MQTT uplink (P03). The heat budget and latch (P04) and power/offline/door-alarm behaviour (P05) build on them.
 
 ## Modules
 
@@ -14,6 +14,12 @@ One firmware for both fridges (`pio run -e fridge-01` / `-e fridge-02`). This pa
 | sensors | `include/sensors.h`, `src/sensors.cpp` | no | DS18B20, asynchronous conversion |
 | leds | `include/leds.h`, `src/leds.cpp` | pattern | green / yellow / red-blink / red-solid latch |
 | display | `include/display.h`, `src/display.cpp` | no | SSD1306 status screen |
+| crypto | `include/crypto.h`, `src/crypto.cpp` | yes | HMAC-SHA256 (mbedtls on the ESP32, portable SHA-256 in native tests), constant-time compare |
+| messages | `include/messages.h`, `src/messages.cpp` | yes | telemetry / event bodies, signed envelope, topics, nonces |
+| seqstore | `include/seqstore.h`, `src/seqstore.cpp`, `include/kv.h`, `src/nvs_kv.cpp` | yes (fake NVS) | persistent message sequence numbers |
+| net | `include/net.h`, `src/net.cpp` | no | Wi-Fi, NTP, MQTT in a FreeRTOS task with backoff |
+| uplink | `include/uplink.h`, `src/uplink.cpp` | no | device secret, boot HMAC self-test, signed publishing, inbox, `dump` |
+| settings | `include/settings.h`, `config_check.py` | no | picks `config.h` or the `config.example.h` placeholders |
 | main | `src/main.cpp` | no | cooperative `millis()` scheduler, relay + blue LED, serial console |
 
 There is no `delay()` in `loop()`. Each task checks its own period with unsigned subtraction (`now - last >= period`), which stays correct across the 49-day `millis()` rollover. The console `status` command prints the worst loop iteration since the last 5 s line (`loop max`); the target is below 20 ms.
@@ -49,14 +55,14 @@ On a fault:
 ## OLED (128×64)
 
 ```
-FRIDGE-01          SAFE    header; inverted video on BREACH
+FRIDGE-01 SIM      SAFE    header (SIM = thermal model, MAN = DS18B20); inverted video on BREACH
 4.6 °C                     size-3 temperature, or SENSOR FAULT
 DOOR:CLOSED COMP:ON
 PWR:MAINS BAT:100%
-MODE:THERMAL MODEL         footer, becomes WIFI / MQTT / BUF in P03 and P05
+WIFI√ MQTT√ SEQ 1234       connectivity (x = down), or SYNCING TIME / HMAC FAIL - OFFLINE / NO SECRET - OFFLINE
 ```
 
-It redraws at 2 Hz, and at once when a discrete field (state, door, compressor, power, mode, fault) changes, so a door toggle shows instantly. It never redraws every loop. The I²C clock while drawing is `OLED_I2C_HZ` (800 kHz, about 12 ms per frame; set `400000` in `config.h` for modules that misbehave above spec).
+It redraws at 2 Hz, and at once when a discrete field (state, door, compressor, power, mode, fault, Wi-Fi, MQTT) changes, so a door toggle shows instantly. It never redraws every loop. The I²C clock while drawing is `OLED_I2C_HZ` (800 kHz, about 12 ms per frame; set `400000` in `config.h` for modules that misbehave above spec).
 
 ## LEDs
 
@@ -66,7 +72,8 @@ Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red 
 
 | Command | Effect |
 |---|---|
-| `status` | full state: mode, model/sensor temperatures, door, compressor and min-off wait, efficiency, speed, loop max, free heap |
+| `status` | full state: mode, model/sensor temperatures, door, compressor and min-off wait, efficiency, speed, loop max, free heap (and lowest), Wi-Fi / MQTT / clock, seq and send counters |
+| `dump` | the last envelope built, in full, to paste into backend tests. Check it with `node tools/gen_vectors.js --verify envelope.json --secret <device secret>` |
 | `set temp X` | set the model temperature (−40…60 °C) |
 | `set eff X` | compressor efficiency 0…2 (1 = healthy; 0.4 cannot hold 8 °C, used for the P17 health demo) |
 | `set speed X` | thermal speed multiplier 0…50 |
@@ -80,9 +87,56 @@ Every 5 s the node prints one line, for example:
 [125s] fridge-01 MODEL T=6.41C SAFE door=CLOSED comp=OFF eff=1.00 speed=x1.0 loop_max=13ms
 ```
 
-Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`) and state changes print as `[event] …` and `[state] …` lines. The power-fail and Wi-Fi buttons are debounced and reported now; their behaviour arrives in P05.
+Events (`BOOT`, `DOOR_OPEN`, `DOOR_CLOSE`, `COMP_ON`, `COMP_OFF`, `SENSOR_FAULT`, `WIFI_BACK`) and state changes print as `[event] …` and `[state] …` lines. Every publish prints a `[tx]` line with its size and the first 4 signature characters. The power-fail and Wi-Fi buttons are debounced and reported now; their behaviour arrives in P05.
 
 All four inputs use a 30 ms debounce (`cfg::DEBOUNCE_MS`). Typical mechanical bounce is under 10 ms. On real hardware, run the `hw-smoke` sketch, read the largest burst of raw transitions, and raise the value if a burst is longer.
+
+## Networking
+
+### Configuration
+
+`include/config.h` is git-ignored and holds the real settings. Generate it from `.env` with `node tools/init_firmware_config.js`. That also creates `DEVICE_SECRET_FRIDGE_01/02` in `.env` if they are missing, so the backend and the virtual node use the same secrets. Or copy `include/config.example.h` by hand.
+
+| Setting | Meaning |
+|---|---|
+| `WIFI_SSID`, `WIFI_PASS` | `Wokwi-GUEST` with an empty password in the simulator |
+| `NTP_SERVER` | `pool.ntp.org` |
+| `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS` | `MQTT_TLS 1` uses `WiFiClientSecure` (port 8883), `0` plain TCP |
+| `MQTT_USER`, `MQTT_PASS` | broker credentials (empty = anonymous) |
+| `MQTT_TOPIC_PREFIX` | topic prefix; use a unique one on shared brokers |
+| `ALLOW_INSECURE_TLS` | simulation only: accept any server certificate. Real deployments remove it and set `MQTT_CA_CERT` to the broker's root CA PEM. The build fails if TLS is on and neither is defined |
+| `DEVICE_SECRETS` | `{{"fridge-01", "<64 hex>"}, {"fridge-02", "<64 hex>"}}`; the node picks the entry for its `FRIDGE_ID` |
+
+Without `config.h` the firmware builds with the placeholders and a compiler warning. `config_check.py` (a PlatformIO pre-script) decides this, because `__has_include("config.h")` also finds other libraries' `config.h`. With the all-zero placeholder secret the node connects, but the server rejects every message as `BAD_SIG`.
+
+### Network task
+
+`PubSubClient::connect()` and the TLS handshake block for seconds. So Wi-Fi, NTP and MQTT run in their own FreeRTOS task (`net`, core 0), and the control loop runs in the Arduino loop task on core 1. The loop never waits on the network:
+
+- `net::publish()` try-locks the client for at most 5 ms and fails at once while the link is down or connecting;
+- received messages (`cmd`, `ack`) are copied into a 4-deep queue that the loop drains with `net::receive()`.
+
+Wi-Fi and MQTT reconnect with exponential backoff, 1 s doubling to 30 s; Wi-Fi auto-reconnect is off so the backoff is ours. On connect the node sets a retained last will `offline` on `{prefix}/{device_id}/status`, publishes `online`, and subscribes to `cmd` and `ack`. The MQTT buffer is 8192 bytes: a full sync chunk of 25 readings is about 4.5 kB once its body is escaped into the envelope, and PubSubClient silently drops anything larger than its buffer.
+
+### Time
+
+`configTime(0, 0, NTP_SERVER)` starts SNTP when Wi-Fi first comes up. Until `time() > 1 700 000 000` the node does not publish, because a 1970 timestamp would be rejected as `STALE_TS`; the OLED footer shows `SYNCING TIME`. `net::nowUnix()` returns 0 until then.
+
+### Messages
+
+- **Telemetry** every `TELEMETRY_PERIOD_S` (5 s), plus immediately with `reason:"door"` and a `DOOR_OPEN` / `DOOR_CLOSE` event on every door change, including a console override. Bodies follow contract §5 exactly. `temp` has two decimals and is `null` on a sensor fault.
+- **Events:** `BOOT` goes out on the first connection with a valid clock. `WIFI_BACK` goes out after a reconnect (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
+- **Envelope** exactly as contract §4: the body is serialised once, signed, then embedded as a JSON string and never re-serialised. `nonce` is 16 hex chars from two `esp_random()` words. `ts` is the send time.
+- `seq` is one counter for telemetry and events. It is written to NVS every 20 increments, and on boot the stored value jumps by 20, so a crash can never make the node reuse a seq.
+
+### Boot self-test
+
+Before networking starts, the node signs every HMAC vector from `contracts/test_vectors.json` (embedded via the generated `include/test_vectors.h`) with mbedtls and prints `HMAC SELFTEST OK`. On a mismatch it prints `HMAC SELFTEST FAILED`, shows `HMAC FAIL - OFFLINE` and never starts networking. The control loop keeps running, because halting the whole node would also stop the compressor.
+
+### Security notes
+
+- The secret is never printed. Logs show only the first 4 signature characters; `dump` prints a full envelope (signature included) on request.
+- PubSubClient publishes at QoS 0 only, so delivery is not guaranteed. Reliability for buffered data comes from application-level acks (P05).
 
 ## Tests
 
@@ -97,3 +151,5 @@ pio test -e native
 | `test_control` | thresholds 3.0 / 7.0, boot min-off, no restart within 60 s (fake clock), `millis()` rollover, force-off, sensor-fault duty |
 | `test_thermal` | one simulated hour at speed 1 cycles between ~3 and ~7 °C and never leaves 2.5–7.5 °C; speed ×6; 3 → 7 °C ≈ 400 s; open door breaches; weak compressor breaches; bounded by ambient; noise σ |
 | `test_ui` | LED pattern per state, 1 Hz blink, latch override, debounce |
+| `test_crypto` | RFC 4231 HMAC case, all 5 shared HMAC vectors, envelope round-trip keeps the exact body, buffer too small, constant-time compare, telemetry body byte-identical to the shared vector, sync-reading shape with `null` temp, event body, topics, nonce |
+| `test_seqstore` | monotonic seq, NVS written every 20 increments, crash + reboot never reuses a seq, flush |

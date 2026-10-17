@@ -1,7 +1,38 @@
-// Copy to config.h (git-ignored) and edit. config.h is optional for the simulator:
-// without it the defaults in pins.h match the Wokwi circuit.
-// Network, broker and secret settings are added here in P03.
+// Copy to config.h (git-ignored) and edit, or run `node tools/init_firmware_config.js` to generate it from .env.
+// Without config.h the firmware builds with these placeholder values (and a compiler warning): the node runs and
+// connects, but the server rejects its messages because DEVICE_SECRETS holds no real secret.
+// Never commit real secrets: config.h is git-ignored, this file holds placeholders only.
 #pragma once
+
+// ---- network ----
+
+#define WIFI_SSID "Wokwi-GUEST"  // Wokwi's simulated open network; real SSID on hardware
+#define WIFI_PASS ""
+#define NTP_SERVER "pool.ntp.org"
+
+// Broker. Wokwi reaches the public internet but not your localhost, so use a cloud broker.
+#define MQTT_HOST "xxxx.s1.eu.hivemq.cloud"
+#define MQTT_PORT 8883
+#define MQTT_TLS 1  // 1 = WiFiClientSecure (port 8883), 0 = plain TCP (e.g. broker.hivemq.com:1883 for quick tests)
+#define MQTT_USER ""
+#define MQTT_PASS ""
+#define MQTT_TOPIC_PREFIX "coldchain/v1"  // use a unique prefix on shared brokers
+
+// TLS server check. The simulator accepts any certificate (Wokwi has no trust store and the cluster CA may
+// change); a real deployment must remove ALLOW_INSECURE_TLS and pin the broker's root CA instead, e.g.
+// HiveMQ Cloud uses Let's Encrypt, so paste the ISRG Root X1 PEM:
+//   #define MQTT_CA_CERT "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+#define ALLOW_INSECURE_TLS
+
+// ---- device identity ----
+// FRIDGE_ID comes from the PlatformIO env (fridge-01 / fridge-02); define it here only for a custom board.
+// One config.h serves both Wokwi projects, so secrets are listed per device id (64 hex chars each, the same
+// values the backend stores for the device).
+#define DEVICE_SECRETS                                                                 \
+  {                                                                                    \
+    {"fridge-01", "0000000000000000000000000000000000000000000000000000000000000000"}, \
+    {"fridge-02", "0000000000000000000000000000000000000000000000000000000000000000"}, \
+  }
 
 // ---- real-hardware switches: same pins, only these values change ----
 

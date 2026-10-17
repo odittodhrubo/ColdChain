@@ -19,10 +19,12 @@ bool drawnOnce = false;
 uint32_t lastDrawAt = 0;
 
 constexpr uint8_t DEGREE = 248;  // degree sign in the CP437 font
+constexpr uint8_t CHECK = 251;   // square-root sign, the closest CP437 glyph to a check mark
 
 bool discreteChanged(const DisplayData& a, const DisplayData& b) {
   return a.state != b.state || a.sensorFault != b.sensorFault || a.doorOpen != b.doorOpen || a.compOn != b.compOn ||
-         a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode;
+         a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode || a.wifi != b.wifi ||
+         a.mqtt != b.mqtt || a.netNote != b.netNote;
 }
 
 void draw(const DisplayData& d) {
@@ -34,6 +36,7 @@ void draw(const DisplayData& d) {
   oled.setTextColor(breach ? SSD1306_BLACK : SSD1306_WHITE);
   oled.setCursor(1, 1);
   oled.print(title);
+  oled.print(d.manualMode ? " MAN" : " SIM");
   const char* word = stateName(d.state);
   oled.setCursor(127 - 6 * strlen(word), 1);
   oled.print(word);
@@ -61,7 +64,15 @@ void draw(const DisplayData& d) {
   oled.setCursor(0, 48);
   oled.printf("PWR:%s BAT:%u%%", d.onBattery ? "BATTERY" : "MAINS", d.battPct);
   oled.setCursor(0, 56);
-  oled.print(d.manualMode ? "MODE:MANUAL DS18B20" : "MODE:THERMAL MODEL");
+  if (d.netNote) {
+    oled.print(d.netNote);
+  } else {
+    oled.print("WIFI");
+    oled.write(d.wifi ? CHECK : 'x');
+    oled.print(" MQTT");
+    oled.write(d.mqtt ? CHECK : 'x');
+    oled.printf(" SEQ %lu", static_cast<unsigned long>(d.seq));
+  }
   oled.display();
 }
 }  // namespace

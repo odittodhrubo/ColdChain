@@ -1,6 +1,7 @@
-// ColdChain fridge node, P02: local control loop without networking (networking arrives in P03).
+// ColdChain fridge node: local control loop (P02) plus the signed MQTT uplink (P03).
 // Cooperative scheduler on millis(): every task checks its own period with unsigned subtraction, nothing blocks,
-// so the compressor logic keeps running whatever else happens. No delay() anywhere in loop().
+// so the compressor logic keeps running whatever else happens. No delay() anywhere in loop(). Networking runs in
+// its own task (net.cpp), so a slow broker or Wi-Fi loss never stalls this loop.
 #include <Arduino.h>
 #include <ctype.h>
 #include <math.h>
@@ -12,11 +13,14 @@
 #include "display.h"
 #include "inputs.h"
 #include "leds.h"
+#include "messages.h"
+#include "net.h"
 #include "node_config.h"
 #include "pins.h"
 #include "sensors.h"
 #include "status.h"
 #include "thermal_model.h"
+#include "uplink.h"
 
 #ifndef FRIDGE_ID
 #error "FRIDGE_ID must be set via build_flags in platformio.ini"
@@ -34,7 +38,8 @@ float temp = NAN;
 bool sensorFault = false;
 FridgeState state = FridgeState::SAFE;
 
-uint32_t lastStepAt = 0, lastSampleAt = 0, lastLineAt = 0, loopStartAt = 0;
+bool lastDoor = false;  // door state last reported, so a console override also produces an event
+uint32_t lastStepAt = 0, lastSampleAt = 0, lastLineAt = 0, lastTelemetryAt = 0, loopStartAt = 0;
 uint32_t loopMaxMs = 0;  // worst loop iteration since the last status line
 
 bool doorOpen() { return doorOverride >= 0 ? doorOverride == 1 : inputs::doorOpen(); }
@@ -44,8 +49,13 @@ void driveCompressor(bool on) {
   digitalWrite(pins::PIN_LED_BLUE, on ? HIGH : LOW);  // blue LED always mirrors the relay
 }
 
-// Events are printed now; P03 publishes them signed on {prefix}/{device_id}/event.
-void event(const char* type) { Serial.printf("[event] %s\n", type); }
+void event(const char* type) { uplink::event(type); }
+
+// seq and ts are filled in by the uplink when the reading is sent.
+Reading reading(bool doorReason) {
+  return {0, 0, sensorFault ? NAN : temp, doorOpen(), comp.on(), false, 100, state, 0, leds::latch(),
+          inputs::manualMode(), doorReason};
+}
 
 void printLine() {
   Serial.printf("[%lus] %s %s T=%.2fC %s door=%s comp=%s%s eff=%.2f speed=x%.1f loop_max=%lums\n",
@@ -66,12 +76,13 @@ void printStatus() {
                 comp.waitingMinOff(millis()) ? " waiting min-off" : "", cc::COMP_ON_AT_C, cc::COMP_OFF_AT_C,
                 static_cast<unsigned long>(cc::COMP_MIN_OFF_S));
   Serial.printf("model      efficiency %.2f  speed x%.1f\n", model.efficiency(), model.speed());
-  Serial.printf("loop       max %lu ms  free heap %lu B\n", static_cast<unsigned long>(loopMaxMs),
-                static_cast<unsigned long>(ESP.getFreeHeap()));
+  Serial.printf("loop       max %lu ms  free heap %lu B (lowest %lu B)\n", static_cast<unsigned long>(loopMaxMs),
+                static_cast<unsigned long>(ESP.getFreeHeap()), static_cast<unsigned long>(ESP.getMinFreeHeap()));
+  uplink::printStatus();
 }
 
 void printHelp() {
-  Serial.println("commands: status | set temp X | set eff X | set speed X | door open|close|auto | help");
+  Serial.println("commands: status | dump | set temp X | set eff X | set speed X | door open|close|auto | help");
 }
 
 bool parseFloat(const char* s, float& out) {
@@ -84,6 +95,8 @@ void runCommand(char* line) {
   float v;
   if (strcmp(line, "status") == 0) {
     printStatus();
+  } else if (strcmp(line, "dump") == 0) {
+    uplink::dump();
   } else if (strncmp(line, "set temp ", 9) == 0 && parseFloat(line + 9, v) && v > -40 && v < 60) {
     model.setTemp(v);
     Serial.printf("model temperature set to %.2f C%s\n", v,
@@ -159,12 +172,13 @@ void setup() {
   leds::begin();
   sensors::begin();
   if (!display::begin(FRIDGE_ID)) Serial.printf("[oled] SSD1306 not found at 0x%02X\n", OLED_I2C_ADDR);
-  event("BOOT");
+  uplink::begin(FRIDGE_ID);  // BOOT is sent once the clock is valid and the broker is reachable
   printHelp();
 
   lastStepAt = millis();
   sample(lastStepAt);
   lastSampleAt = lastStepAt;
+  lastDoor = doorOpen();
 }
 
 void loop() {
@@ -172,10 +186,7 @@ void loop() {
   loopStartAt = now;
 
   const InputEvents ev = inputs::poll(now);
-  if (ev.doorChanged) {
-    doorOverride = -1;
-    event(inputs::doorOpen() ? "DOOR_OPEN" : "DOOR_CLOSE");
-  }
+  if (ev.doorChanged) doorOverride = -1;
   if (ev.modeChanged) Serial.printf("[mode] %s\n", inputs::manualMode() ? "MANUAL (DS18B20)" : "MODEL");
   if (ev.powerPressed) Serial.println("[input] power-fail button (MAINS/BATTERY simulation arrives in P05)");
   if (ev.wifiPressed) Serial.println("[input] Wi-Fi outage button (outage simulation arrives in P05)");
@@ -186,13 +197,30 @@ void loop() {
   lastStepAt = now;
   sensors::update(now);
 
-  if (now - lastSampleAt >= SAMPLE_MS || ev.doorChanged || ev.modeChanged) {
+  const bool door = doorOpen();
+  const bool doorChanged = door != lastDoor;
+  if (now - lastSampleAt >= SAMPLE_MS || doorChanged || ev.modeChanged) {
     lastSampleAt = now;
     sample(now);
   }
 
+  // Door change: event plus immediate telemetry (reason "door"); otherwise telemetry every TELEMETRY_PERIOD_S.
+  if (doorChanged) {
+    lastDoor = door;
+    event(door ? "DOOR_OPEN" : "DOOR_CLOSE");
+    uplink::telemetry(reading(true));
+    lastTelemetryAt = now;
+  } else if (now - lastTelemetryAt >= cc::TELEMETRY_PERIOD_S * 1000u) {
+    uplink::telemetry(reading(false));
+    lastTelemetryAt = now;
+  }
+  uplink::poll(now);
+
   leds::update(state, now);
-  display::update({state, temp, sensorFault, doorOpen(), comp.on(), false, 100, inputs::manualMode()}, now);
+  const net::Status st = net::status();
+  display::update({state, temp, sensorFault, door, comp.on(), false, 100, inputs::manualMode(), st.wifi, st.mqtt,
+                   uplink::lastSeq(), uplink::footerNote()},
+                  now);
 
   if (now - lastLineAt >= cfg::STATUS_LINE_MS) {
     lastLineAt = now;

@@ -28,4 +28,34 @@ constexpr StatusVector STATUS[] = {
 };
 constexpr size_t STATUS_COUNT = sizeof(STATUS) / sizeof(STATUS[0]);
 
+// Embedded in the firmware for the boot HMAC self-test. Test secrets only, never real device secrets.
+struct HmacVector {
+  const char* secret;
+  const char* device_id;
+  const char* kind;
+  unsigned long ts;
+  const char* nonce;
+  const char* body;
+  const char* sig;
+};
+
+constexpr HmacVector HMAC[] = {
+    {"251cb978b97a13dad116f67af2f3a010ed7b02f4a2d5e38bcd4e6bf21ce13da8", "fridge-01", "telemetry", 1767225600UL, "9f2c1a7b5d3e4f60",
+     "{\"seq\":1204,\"ts\":1767225600,\"temp\":4.62,\"door\":0,\"comp\":1,\"power\":\"MAINS\",\"batt\":100,\"state\":\"SAFE\",\"exp_s\":0,\"latch\":0,\"mode\":\"model\",\"buf\":0,\"rssi\":-58,\"fw\":\"1.0.0\",\"reason\":\"periodic\"}",
+     "0fced2b983663b1b45e72319e071f7ce5b018332b74875e0092067ea315bb822"},
+    {"58b3a2d4883d68a75dddfa65dd8981e761e461d7ba748e382273c0c5146fc5ee", "fridge-02", "event", 1767225605UL, "0123456789abcdef",
+     "{\"seq\":88,\"ts\":1767225604,\"type\":\"DOOR_OPEN\",\"data\":{}}",
+     "4b1d2b1fc7167f4b3a97c5bfc5fb9bc35d5f559650c2e349ba27767dd1a2108d"},
+    {"f1fa0c1d4d89c455c61a7bd76763583cdbe7f2d0ad791f4a37bf266f65f10940", "fridge-01", "sync", 1767229200UL, "a1b2c3d4e5f60718",
+     "{\"from_seq\":1300,\"to_seq\":1301,\"readings\":[{\"seq\":1300,\"ts\":1767228000,\"temp\":8.4,\"door\":1,\"comp\":0,\"power\":\"BATTERY\",\"batt\":92,\"state\":\"BREACH\",\"exp_s\":30,\"latch\":0,\"mode\":\"model\",\"reason\":\"periodic\"},{\"seq\":1301,\"ts\":1767228005,\"temp\":8.6,\"door\":1,\"comp\":0,\"power\":\"BATTERY\",\"batt\":92,\"state\":\"BREACH\",\"exp_s\":35,\"latch\":0,\"mode\":\"model\",\"reason\":\"periodic\"}]}",
+     "7f5341d45055be6998b8c2a851134f868901e0b96466b44842140c82ba88a000"},
+    {"f00cc7bc5e02736f59278b1fce944f08e4bfd012701c1f520b34412156769340", "fridge-01", "ack", 1767229201UL, "ffeeddccbbaa9988",
+     "{\"seq_upto\":1301}",
+     "bf00b41e500c34fe27587482caeeae4e4126c83174863347cac0dcd33bc22755"},
+    {"edf8407fd00c27e3663f1b0e384dc2a62b569b68d865f60017bea55650d10316", "fridge-02", "cmd", 1767230000UL, "5a5a5a5a00000001",
+     "{\"cmd_id\":\"3f1d2c4b-8e7a-4b6c-9d0e-1f2a3b4c5d6e\",\"type\":\"RESET_LATCH\",\"args\":{}}",
+     "232e18bb05567f169989a547a8ff72b8b5624a1e2f997d501b886d5da8874117"},
+};
+constexpr size_t HMAC_COUNT = sizeof(HMAC) / sizeof(HMAC[0]);
+
 }  // namespace vectors

@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P02 firmware core** (local control loop, no networking yet). Services expose health endpoints only; features land prompt by prompt (P03–P21).
+> Status: **P03 firmware networking** (signed MQTT telemetry from the fridge nodes). Services expose health endpoints only; features land prompt by prompt (P04–P21).
 
 ## Architecture
 
@@ -76,10 +76,14 @@ npm run setup                 # backend + frontend node_modules
 python -m venv .venv          # Python env for ml/ and tools/
 .venv/Scripts/python -m pip install -r ml/requirements-dev.txt -e "tools[dev]"   # Windows
 # .venv/bin/python -m pip install -r ml/requirements-dev.txt -e "tools[dev]"     # macOS / Linux
-npm run env:init              # .env from .env.example with generated JWT_SECRET and APP_SECRET_KEY
+npm run env:init              # .env from .env.example with generated JWT_SECRET, APP_SECRET_KEY, device secrets
 ```
 
-With `make` the first three lines are `make setup`. Then fill in `MQTT_*` (and alerts) in `.env`.
+With `make` the first three lines are `make setup`. Then fill in `MQTT_*` (and alerts) in `.env`, and generate the firmware's git-ignored `config.h` from it (same broker, same device secrets):
+
+```bash
+node tools/init_firmware_config.js        # --force to regenerate
+```
 
 Run everything in Docker:
 

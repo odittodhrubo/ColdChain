@@ -1,0 +1,40 @@
+// Wi-Fi, NTP and MQTT (ESP32 only).
+// PubSubClient::connect() and the TLS handshake block for seconds, so all connection handling runs in its own
+// FreeRTOS task on core 0. The control loop (Arduino loop task, core 1) never waits on the network: it publishes
+// through a try-lock that fails fast when the link is down or busy, and drains received messages from a queue.
+#pragma once
+#include <stddef.h>
+#include <stdint.h>
+
+namespace net {
+
+struct Incoming {
+  char topic[96];
+  char payload[1024];  // cmd and ack envelopes are < 600 B
+  size_t len;
+  bool truncated;
+};
+
+struct Status {
+  bool wifi;
+  bool mqtt;
+  bool timeValid;
+  bool outage;  // simulated Wi-Fi outage (P05)
+  int rssi;
+};
+
+// Starts the network task. topics: status (LWT), and the two subscriptions.
+void begin(const char* device_id, const char* status_topic, const char* cmd_topic, const char* ack_topic);
+
+Status status();
+bool uplink();      // MQTT connected and clock valid: the only state in which the node publishes
+uint32_t nowUnix();  // unix seconds, 0 until NTP has set the clock (time() > 1 700 000 000)
+
+// Fails at once (returns false) when not connected or the client is busy connecting.
+bool publish(const char* topic, const char* payload);
+
+bool receive(Incoming& out);  // non-blocking
+
+void setOutage(bool on);  // refuse to connect while set (P05 Wi-Fi outage button)
+
+}  // namespace net

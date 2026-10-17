@@ -46,6 +46,30 @@ function remainingPct(weighted) {
   return Math.max(0, 100 * (1 - weighted / C.BUDGET_S));
 }
 
+// ---- verify mode: node tools/gen_vectors.js --verify <envelope.json | -> --secret <secret> ----
+// Checks a captured envelope (e.g. the firmware `dump` output) with the reference signer above.
+
+if (process.argv.includes('--verify')) {
+  const arg = (flag) => process.argv[process.argv.indexOf(flag) + 1];
+  const src = arg('--verify');
+  const secret = arg('--secret');
+  if (!src || !secret) {
+    console.error('usage: node tools/gen_vectors.js --verify <envelope.json | -> --secret <secret>');
+    process.exit(2);
+  }
+  const env = JSON.parse(fs.readFileSync(src === '-' ? 0 : src, 'utf8'));
+  const missing = ['v', 'device_id', 'kind', 'ts', 'nonce', 'body', 'sig'].filter((k) => !(k in env));
+  if (missing.length) {
+    console.error(`FAIL missing fields: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+  const expected = sign(secret, env);
+  const got = Buffer.from(String(env.sig).padEnd(64).slice(0, 64));
+  const ok = crypto.timingSafeEqual(Buffer.from(expected), got);
+  console.log(ok ? `OK ${env.kind} from ${env.device_id}, ts ${env.ts}` : `FAIL bad signature (expected ${expected.slice(0, 4)}...)`);
+  process.exit(ok ? 0 : 1);
+}
+
 // ---- inputs ----
 
 const testSecret = (n) => crypto.createHash('sha256').update(`coldchain-test-secret-${n}`).digest('hex');
@@ -167,6 +191,25 @@ const header = [
   ),
   '};',
   'constexpr size_t STATUS_COUNT = sizeof(STATUS) / sizeof(STATUS[0]);',
+  '',
+  '// Embedded in the firmware for the boot HMAC self-test. Test secrets only, never real device secrets.',
+  'struct HmacVector {',
+  '  const char* secret;',
+  '  const char* device_id;',
+  '  const char* kind;',
+  '  unsigned long ts;',
+  '  const char* nonce;',
+  '  const char* body;',
+  '  const char* sig;',
+  '};',
+  '',
+  'constexpr HmacVector HMAC[] = {',
+  ...vectors.hmac.map(
+    (v) =>
+      `    {"${v.secret}", "${v.device_id}", "${v.kind}", ${v.ts}UL, "${v.nonce}",\n     ${JSON.stringify(v.body)},\n     "${v.sig}"},`,
+  ),
+  '};',
+  'constexpr size_t HMAC_COUNT = sizeof(HMAC) / sizeof(HMAC[0]);',
   '',
   '}  // namespace vectors',
   '',

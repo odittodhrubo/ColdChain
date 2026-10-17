@@ -19,6 +19,10 @@ struct DisplayData {
   bool onBattery;
   uint8_t battPct;
   bool manualMode;
+  bool wifi;
+  bool mqtt;
+  uint32_t seq;
+  const char* netNote;  // replaces the footer when set (SYNCING TIME, HMAC FAIL, ...)
 };
 
 namespace display {
