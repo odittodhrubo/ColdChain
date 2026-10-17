@@ -1,0 +1,42 @@
+# dependencies / build
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# env & secrets (never commit)
+.env
+.env.*
+!.env.example
+config.h
+
+# data
+/data/
+backend/data/
+ml/data/raw/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# ml models cache
+ml/models/cache/
+ml/.cache/
+*.joblib
+
+# platformio
+.pio/
+
+# editors / os
+.DS_Store
+Thumbs.db
+.idea/

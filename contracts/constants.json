@@ -1,0 +1,33 @@
+{
+  "_comment": "Single source of truth for thresholds, timings and topics. Edit here, then run `python tools/gen_constants.py`. Never hard-code these values anywhere else.",
+
+  "SAFE_MIN_C": 2.0,
+  "SAFE_MAX_C": 8.0,
+  "WARN_HIGH_C": 7.5,
+  "WARN_LOW_C": 2.5,
+  "COMP_ON_AT_C": 7.0,
+  "COMP_OFF_AT_C": 3.0,
+  "COMP_MIN_OFF_S": 60,
+  "TELEMETRY_PERIOD_S": 5,
+  "BUDGET_S": 3600,
+  "DOUBLE_ABOVE_C": 12.0,
+  "AT_RISK_PCT": 20,
+  "DOOR_ALARM_S": 60,
+  "BUFFER_CAPACITY": 720,
+  "SYNC_CHUNK": 25,
+  "HMAC_WINDOW_S": 30,
+  "NONCE_TTL_S": 120,
+  "FORECAST_HORIZON_MIN": 30,
+  "GAP_CONSERVATIVE_S": 15,
+  "ENVELOPE_VERSION": 1,
+
+  "TOPICS": {
+    "telemetry": "{prefix}/{device_id}/telemetry",
+    "event": "{prefix}/{device_id}/event",
+    "sync": "{prefix}/{device_id}/sync",
+    "ack": "{prefix}/{device_id}/ack",
+    "cmd": "{prefix}/{device_id}/cmd",
+    "cmdack": "{prefix}/{device_id}/cmdack",
+    "status": "{prefix}/{device_id}/status"
+  }
+}
