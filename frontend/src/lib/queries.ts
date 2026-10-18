@@ -41,6 +41,7 @@ export interface HistoryPoint {
   comp: number;
   battery: number;
   late: number;
+  seeded?: number; // 1 = backfilled by the demo seed, not sent by a device
 }
 
 export function useReadings(id: string, rangeS: number, bucket?: number) {

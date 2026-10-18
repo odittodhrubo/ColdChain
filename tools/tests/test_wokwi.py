@@ -3,6 +3,7 @@
 import configparser
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -142,8 +143,9 @@ def test_wiring_matches_pin_map(project):
         "DOOR": "door:2",
         "RELAY": "relay:IN",
         "BUZZER": "buzzer:2",
-        "BTN_POWER": "btn_power:1.l",
-        "BTN_WIFI": "btn_wifi:1.l",
+        # pushbutton legs 1.l/1.r are one contact and 2.l/2.r the other: the GPIO goes to 1, GND to 2
+        "BTN_POWER": "btn_power:1.r",
+        "BTN_WIFI": "btn_wifi:1.r",
         "MODE": "mode:2",
         "I2C_SDA": "oled:SDA",
         "I2C_SCL": "oled:SCL",
@@ -152,8 +154,13 @@ def test_wiring_matches_pin_map(project):
         assert joined(f"esp:{p[name]}", target), f"GPIO{p[name]} ({name}) not wired to {target}"
     for color in ["green", "yellow", "red", "blue"]:
         gpio = p[f"LED_{color.upper()}"]
-        assert joined(f"esp:{gpio}", f"r_{color}:1"), f"GPIO{gpio} not wired to r_{color}"
-        assert joined(f"r_{color}:2", f"led_{color}:A")
+        ends = [
+            f"r_{color}:1",
+            f"r_{color}:2",
+        ]  # a resistor has no polarity: one end GPIO, the other the anode
+        to_gpio = [e for e in ends if joined(f"esp:{gpio}", e)]
+        assert len(to_gpio) == 1, f"GPIO{gpio} not wired to exactly one end of r_{color}"
+        assert joined(ends[1 - ends.index(to_gpio[0])], f"led_{color}:A")
         assert n[f"led_{color}:C"] & GND
 
 
@@ -203,3 +210,85 @@ def test_wokwi_toml_points_at_a_platformio_env(project):
     ini = configparser.ConfigParser()
     ini.read(NODE / "platformio.ini")
     assert f"env:{env}" in ini.sections()
+
+
+# ---------------------------------------------------------------- drawing quality and the wokwi.com sketch
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import gen_wokwi  # noqa: E402  (pin geometry of the Wokwi parts)
+
+MAX_CROSSINGS = 13  # what the committed layout achieves; a messier layout change fails here
+
+
+def wire_paths(d: dict) -> list[tuple[str, str, list]]:
+    """Replay every wire's placement moves from its source pin, as Wokwi draws it."""
+    parts = {p["id"]: p for p in d["parts"]}
+    out = []
+    for a, b, _color, moves in d["connections"]:
+        if a.startswith("$") or b.startswith("$"):
+            continue
+        (ax, ay, _), (bx, by, _) = (
+            gen_wokwi.pin_xy(parts[e.split(":")[0]], e.split(":", 1)[1]) for e in (a, b)
+        )
+        pts = [(ax, ay)]
+        for m in moves:
+            x, y = pts[-1]
+            v = float(m[1:])
+            pts.append((round(x + v, 2), y) if m[0] == "h" else (x, round(y + v, 2)))
+        out.append((a, b, pts + [(bx, by)]))
+    return out
+
+
+@pytest.mark.parametrize("project", PROJECTS)
+def test_wires_are_readable(project):
+    d = load(project)
+    n = nets(d)
+    segs = []
+    for a, b, pts in wire_paths(d):
+        last, end = pts[-2], pts[-1]
+        assert abs(last[0] - end[0]) < 0.01 or abs(last[1] - end[1]) < 0.01, f"{a}-{b}: diagonal last stretch"
+        for k, (p, q) in enumerate(zip(pts, pts[1:], strict=False)):
+            assert p[0] == q[0] or p[1] == q[1], f"{a}-{b}: diagonal segment"
+            segs.append((n[a], p, q, k in (0, len(pts) - 2)))
+    boxes = [gen_wokwi.part_box(p) for p in d["parts"]]
+    crossings = 0
+    for i, (net1, p, q, stub1) in enumerate(segs):
+        h1 = p[1] == q[1]
+        if not stub1:  # pin stubs leave their own part; everything else stays clear of every part and label
+            lx, hx, ly, hy = min(p[0], q[0]), max(p[0], q[0]), min(p[1], q[1]), max(p[1], q[1])
+            assert not any(lx < x1 and hx > x0 and ly < y1 and hy > y0 for x0, y0, x1, y1 in boxes), (
+                f"wire over a part at {p}-{q}"
+            )
+        for net2, r, s, _ in segs[i + 1 :]:
+            if net1 == net2:
+                continue
+            h2 = r[1] == s[1]
+            if h1 == h2:  # parallel: must not run along (or hug) another net's wire
+                a1, a2 = (p[1], r[1]) if h1 else (p[0], r[0])
+                lo1, hi1 = sorted((p[0], q[0]) if h1 else (p[1], q[1]))
+                lo2, hi2 = sorted((r[0], s[0]) if h1 else (r[1], s[1]))
+                assert not (abs(a1 - a2) < 5 and hi1 > lo2 and hi2 > lo1), (
+                    f"overlapping wires at {p}-{q} / {r}-{s}"
+                )
+            else:
+                (hp, hq), (vr, vs) = ((p, q), (r, s)) if h1 else ((r, s), (p, q))
+                if min(hp[0], hq[0]) < vr[0] < max(hp[0], hq[0]) and min(vr[1], vs[1]) < hp[1] < max(
+                    vr[1], vs[1]
+                ):
+                    crossings += 1
+    assert crossings <= MAX_CROSSINGS
+
+
+@pytest.mark.parametrize("project", PROJECTS)
+def test_sketch_folder_is_complete(project):
+    """wokwi.com / Arduino IDE build: sketch.ino plus every local header and module it needs."""
+    folder = NODE / "wokwi" / project
+    ino = (folder / "sketch.ino").read_text(encoding="utf-8")
+    assert "void setup()" in ino and "void loop()" in ino
+    local = {p.name for p in folder.iterdir()}
+    for f in [folder / "sketch.ino", *folder.glob("*.cpp"), *folder.glob("*.h")]:
+        for inc in re.findall(r'#include\s+"([^"]+)"', f.read_text(encoding="utf-8")):
+            assert inc in local or inc == "config.h", f"{f.name} includes {inc}, which is not in the folder"
+    assert "libraries.txt" in local
+    if project != "hw-smoke":
+        assert f'#define FRIDGE_ID "{project}"' in ino
+        assert {p.name for p in (NODE / "src").glob("*.cpp")} - {"main.cpp"} <= local

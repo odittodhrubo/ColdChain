@@ -16,7 +16,11 @@
     "up": "docker compose -f infra/docker-compose.yml up -d --build --renew-anon-volumes",
     "down": "docker compose -f infra/docker-compose.yml down",
     "seed": "npm --prefix backend run seed",
-    "demo": "npm --prefix backend run demo",
+    "demo": "cd tools && python -m coldchain_tools.stack demo",
+    "scenarios": "cd tools && python -m coldchain_tools.scenarios",
+    "check:security": "cd tools && python -m coldchain_tools.security_check",
+    "check:perf": "cd tools && python -m coldchain_tools.perf",
+    "broker": "npm --prefix backend run broker",
     "ml:data": "cd ml && python -m data.generate",
     "ml:train": "cd ml && python -m train"
   }

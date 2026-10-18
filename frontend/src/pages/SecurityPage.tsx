@@ -39,6 +39,7 @@ interface Summary {
     active: boolean;
     last_seen_at: number | null;
     open_gap: { from: number; to: number } | null;
+    clock_skew_s: number | null;
   }[];
   server_time: number;
 }
@@ -128,6 +129,15 @@ export function SecurityPage() {
                       {d.open_gap && (
                         <span className="ml-2 font-semibold text-warning">
                           seq gap {d.open_gap.from}–{d.open_gap.to}
+                        </span>
+                      )}
+                      {d.clock_skew_s !== null && (
+                        <span
+                          className={`ml-2 ${Math.abs(d.clock_skew_s) > 10 ? 'font-semibold text-warning' : ''}`}
+                          title="Server receipt time minus the device's timestamp. Beyond ±30 s messages are refused as STALE_TS: check NTP on the device and this server."
+                        >
+                          clock skew {d.clock_skew_s > 0 ? '+' : ''}
+                          {d.clock_skew_s} s
                         </span>
                       )}
                     </span>

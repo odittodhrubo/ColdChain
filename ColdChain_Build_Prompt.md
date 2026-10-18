@@ -586,7 +586,7 @@ Implement the tamper-evident logging module `backend/src/modules/audit`.
 - [ ] Triggers block ordinary UPDATE/DELETE.
 - [ ] Telemetry checkpoints verify against `readings`; altering a stored reading breaks verification.
 - [ ] Concurrent appends keep a single valid chain.
-- [ ] Audit read API is paginated and role-protected as per matrix.
+- [x] Audit read API is paginated and role-protected as per matrix.
 
 ---
 
@@ -1138,8 +1138,8 @@ Produce `docs/VIDEO_PLAN.md` and supporting files so the team can record and sub
 ## Task 4 — Web Application
 - [ ] **JWT + bcrypt**, Admin / Pharmacist / Inspector, **permissions enforced on the server** (P07, S9).
 - [ ] **Live dashboard**: temperature, door, power, compressor, heat-budget status, well-designed UI (P13, P14).
-- [ ] **Inventory**: manage batches; assign/move between fridges (P10, P15).
-- [ ] **Public QR check**: Safe / At Risk / Discard + expiry, **no login** (P10, P15).
+- [x] **Inventory**: manage batches; assign/move between fridges (P10, P15).
+- [x] **Public QR check**: Safe / At Risk / Discard + expiry, **no login** (P10, P15).
 - [ ] **Device security**: HMAC-SHA256 + timestamp + nonce; invalid and replayed messages **rejected and logged** (P09).
 - [ ] **Tamper-evident logs**: hash chain + **Verify Integrity** detects edited records (P08, P15).
 
@@ -1148,7 +1148,7 @@ Produce `docs/VIDEO_PLAN.md` and supporting files so the team can record and sub
 - [ ] **Compressor weakening** detection with a **0–100 health score** (P17, P19).
 - [ ] Suggests **which batches to move and where** when a fridge may become unsafe (P18).
 - [ ] Pharmacist confirms the relocation with **one click** (P18, P19).
-- [ ] Short report with **dataset, features, results** (P16, P17, `REPORT.md`, AI Report page).
+- [x] Short report with **dataset, features, results** (P16, P17, `REPORT.md`, AI Report page).
 
 ## Quality gates
 - [ ] `make test` passes in every service; shared vectors pass in firmware, backend, simulator.
