@@ -7,6 +7,7 @@ import { DEFAULT_ROUTES, mockApi, renderApp, signIn } from '../test-utils';
 import { verifyStream } from './AuditPage';
 import { burstIds } from './SecurityPage';
 import { passwordProblem } from './UsersPage';
+import './InventoryPage'; // the route is lazy: load it up front so the first test does not pay for it
 
 afterEach(() => {
   vi.unstubAllGlobals();
