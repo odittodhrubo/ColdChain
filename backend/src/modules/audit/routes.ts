@@ -14,6 +14,7 @@ export function auditRoutes(): RouteDef[] {
       query: z.strictObject({
         type: z.enum(AUDIT_EVENTS).optional(),
         actor: z.string().max(100).optional(),
+        batch_id: intParam.positive().optional(), // entries about one batch (inventory details drawer)
         from: intParam.nonnegative().optional(), // unix ms
         to: intParam.nonnegative().optional(),
         page: intParam.min(1).default(1),
@@ -25,6 +26,7 @@ export function auditRoutes(): RouteDef[] {
           [
             ['event_type = ?', query.type],
             ['actor = ?', query.actor],
+            ["json_extract(payload, '$.batch_id') = ?", query.batch_id],
             ['ts >= ?', query.from],
             ['ts <= ?', query.to],
           ] as const

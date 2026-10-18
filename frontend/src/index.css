@@ -202,3 +202,39 @@
     transition-duration: 1ms !important;
   }
 }
+
+/* Printed QR label: only the label prints, at a fixed physical size with the QR's quiet zone intact. */
+.print-label {
+  display: none;
+}
+@media print {
+  body > *:not(.print-label) {
+    display: none !important;
+  }
+  .print-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1mm;
+    width: 54mm;
+    padding: 3mm;
+    border: 0.3mm solid #000;
+    color: #000;
+    background: #fff;
+    font:
+      9pt/1.25 'Public Sans Variable',
+      sans-serif;
+    text-align: center;
+  }
+  .print-label img {
+    width: 40mm;
+    height: auto;
+  }
+  .print-label p {
+    margin: 0;
+  }
+  .print-label .print-label-name {
+    font-weight: 700;
+    font-size: 10.5pt;
+  }
+}

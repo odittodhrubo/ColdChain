@@ -339,3 +339,22 @@ describe('public QR check endpoint', () => {
     expect(new Set(tokens.join('')).size).toBeGreaterThan(60); // the whole 64-symbol alphabet is in use
   });
 });
+
+describe('inventory support', () => {
+  it('batch detail carries the public URL its QR encodes; audit entries filter by batch', async () => {
+    const t = makeApp({ PUBLIC_BASE_URL: 'https://cc.example' });
+    const batch = mk(t, addFridge(t));
+    const other = mk(t, addFridge(t));
+    const auth = await asRole(t, 'INSPECTOR');
+    const detail = await t.http().get(`/api/batches/${batch.id}`).set(auth);
+    expect(detail.body.public_url).toBe(`https://cc.example/check/${batch.public_token}`);
+    const audit = await t.http().get(`/api/audit?batch_id=${batch.id}`).set(auth);
+    expect(
+      audit.body.entries.map((e: { event_type: string; payload: { batch_id: number } }) => [
+        e.event_type,
+        e.payload.batch_id,
+      ]),
+    ).toEqual([['BATCH_CREATED', batch.id]]);
+    expect(other.id).not.toBe(batch.id);
+  });
+});

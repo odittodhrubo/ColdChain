@@ -109,6 +109,7 @@ export function batchRoutes(): RouteDef[] {
         const batch = getBatch(db, params.id);
         return {
           batch,
+          public_url: publicCheckUrl(config.PUBLIC_BASE_URL, batch.public_token), // what the QR encodes
           demoScale: config.DEMO_TIME_SCALE,
           assignments: assignmentHistory(db, params.id),
           exposure: {

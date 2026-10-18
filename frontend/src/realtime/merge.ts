@@ -10,6 +10,7 @@ import type { QueryClient } from '@tanstack/react-query';
 //   ['batch', id]               { batch: Batch, ... }
 //   ['alerts', ...]             alert lists and the top-bar summary
 //   ['predictions', fridgeId], ['relocations'], ['health']
+//   ['security', ...]           rejected-message summary and list
 
 export const REALTIME_EVENTS = [
   'fridge:update',
@@ -19,6 +20,7 @@ export const REALTIME_EVENTS = [
   'alert:update',
   'prediction:update',
   'relocation:update',
+  'security:event',
 ] as const;
 export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
 
@@ -32,6 +34,7 @@ export const POLLED_KEYS = [
   'predictions',
   'relocations',
   'health',
+  'security',
 ];
 
 interface WithId {
@@ -110,6 +113,9 @@ export function applyRealtimeEvent(qc: QueryClient, event: string, data: unknown
       break;
     case 'relocation:update':
       void qc.invalidateQueries({ queryKey: ['relocations'] });
+      break;
+    case 'security:event':
+      void qc.invalidateQueries({ queryKey: ['security'] });
       break;
   }
 }

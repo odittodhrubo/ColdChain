@@ -464,3 +464,27 @@ describe('API', () => {
     expect(JSON.stringify(sec.body)).not.toContain('{bad');
   });
 });
+
+describe('security summary', () => {
+  it('counts accepted vs rejected in the last hour, rejects by reason, and devices with last seen', async () => {
+    const { t, ingest } = setup();
+    const now = Date.now();
+    const ts = Math.floor(now / 1000);
+    ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(1, { ts }), { ts }), now);
+    for (let i = 0; i < 3; i++)
+      ingest.handle(
+        topic('telemetry'),
+        envelope('telemetry', telemetry(10 + i, { ts }), { ts, secret: 'ff'.repeat(32) }),
+        now,
+      );
+    const res = await t
+      .http()
+      .get('/api/security/summary')
+      .set(bearer(tokenFor(t, await addUser(t, 'PHARMACIST'))));
+    expect(res.body).toMatchObject({ accepted: 1, rejected: 3, by_reason: [{ reason: 'BAD_SIG', n: 3 }] });
+    expect(res.body.devices.map((d: { device_id: string }) => d.device_id)).toEqual([
+      'fridge-01',
+      'fridge-02',
+    ]);
+  });
+});

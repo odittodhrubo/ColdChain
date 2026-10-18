@@ -68,7 +68,7 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 |---|---|---|
 | `GET /api/batches?fridge_id&status&expiring_within_days&q&page&pageSize` | `dashboard:read` | `q` searches name, lot and manufacturer (LIKE wildcards escaped) |
 | `POST /api/batches` | `batch:write` | needs `fridge_id`; `409 FRIDGE_FULL` at capacity; expiry must be in the future |
-| `GET /api/batches/:id` | `dashboard:read` | batch, assignment history, exposure summary (with `demoScale`) |
+| `GET /api/batches/:id` | `dashboard:read` | batch, assignment history, exposure summary (with `demoScale`), `public_url` for the QR check page |
 | `PATCH /api/batches/:id` | `batch:write` | any of `name`, `quantity`, `criticality`, `expiry_date` |
 | `DELETE /api/batches/:id` | `batch:delete` (Admin) | soft delete, only at quantity 0 (`409 QUANTITY_NOT_ZERO`); frees the fridge slot |
 | `POST /api/batches/:id/move` `{to_fridge_id}` | `batch:write` | atomic; `409 BATCH_DISCARDED`, `FRIDGE_FULL`, `SAME_FRIDGE` |
@@ -163,7 +163,7 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 ### Read API
 
-`GET /api/audit?type&actor&from&to&page&pageSize` (permission `audit:read`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
+`GET /api/audit?type&actor&batch_id&from&to&page&pageSize` (permission `audit:read`; `batch_id` matches `payload.batch_id`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
 
 ## Device ingestion (MQTT)
 
@@ -198,7 +198,7 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 **Run one ingesting backend per broker prefix.** Two instances on the same database would both process every message, and the second correctly rejects each one as `REPLAY`.
 
-**Endpoints:** `GET /api/security/events?reason&device_id&page&pageSize` (`audit:read`), `GET /api/metrics/ingest` (`metrics:read`: Admin and Inspector) with accepted counts by kind, rejected counts by reason, late readings, sync requests, and per device last seen / online / LWT hint / max seq / acked up to / open gap.
+**Endpoints:** `GET /api/security/events?reason&device_id&page&pageSize` (`audit:read`), `GET /api/security/summary` (`audit:read`: last-hour accepted and rejected counts, rejects by reason, per device active / last accepted / open sequence gap), `GET /api/metrics/ingest` (`metrics:read`: Admin and Inspector) with accepted counts by kind, rejected counts by reason, late readings, sync requests, and per device last seen / online / LWT hint / max seq / acked up to / open gap.
 
 ## Realtime
 

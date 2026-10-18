@@ -55,6 +55,7 @@ const EXAMPLES: Record<string, Example> = {
   'GET /api/audit/verify': async () => ({}),
   'GET /api/security/events': async () => ({ path: '/api/security/events?reason=BAD_SIG' }),
   'GET /api/metrics/ingest': async () => ({}),
+  'GET /api/security/summary': async () => ({}),
   'GET /api/batches': async () => ({}),
   'POST /api/batches': async (t) => ({ body: batchInput(addFridge(t)) }),
   'GET /api/batches/:id': async (t) => ({ path: `/api/batches/${newBatch(t).id}` }),
