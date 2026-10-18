@@ -160,7 +160,7 @@ describe('heat engine', () => {
           ctxOf(t).heat.computeExposure(batch.id).exposureMs,
         );
     }
-  });
+  }, 30_000); // ~1.5 s alone; far longer when every suite runs at once
 
   it('At Risk and Discard fire once each, discard latches the fridge and is permanent', () => {
     const t = makeApp();
