@@ -151,6 +151,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: { paylo
         {p.door ? ' · door opened' : ''}
         {p.battery ? ' · on battery' : ''}
         {p.late ? ' · synced late' : ''}
+        {p.seeded ? ' · seeded demo history' : ''}
       </p>
     </div>
   );
@@ -169,6 +170,7 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
   const chartData: ChartPoint[] = useMemo(() => [...points, ...fc], [points, fc]);
   const risk = prediction ? RISK[prediction.breach_level] : null;
   const strips = useMemo(() => compressorStrips(points, data?.bucket ?? 5), [points, data?.bucket]);
+  const seededUntil = points.filter((p) => p.seeded).at(-1)?.ts; // demo backfill, disclosed on the chart
   const markers = (data?.events ?? []).filter((e) =>
     ['DOOR_OPEN', 'DOOR_ALARM', 'POWER_FAIL'].includes(e.type),
   );
@@ -255,6 +257,22 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
                     ifOverflow="hidden"
                   />
                 ))}
+                {seededUntil !== undefined && (
+                  <ReferenceArea
+                    x1={points[0].ts}
+                    x2={seededUntil}
+                    fill="var(--ink-3)"
+                    fillOpacity={0.08}
+                    stroke="none"
+                    ifOverflow="hidden"
+                    label={{
+                      value: 'seeded demo history',
+                      position: 'insideBottomLeft',
+                      fill: 'var(--ink-3)',
+                      fontSize: 11,
+                    }}
+                  />
+                )}
                 <ReferenceArea
                   y1={SAFE_MIN_C}
                   y2={SAFE_MAX_C}
@@ -358,6 +376,12 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
               <span className="size-2 rotate-45 bg-warning" />
               Arrived late through sync
             </li>
+            {seededUntil !== undefined && (
+              <li className="flex items-center gap-1.5">
+                <span className="h-2.5 w-4 rounded-sm bg-ink-3/20" />
+                Seeded demo history (not from a device)
+              </li>
+            )}
             {fc.length > 0 && (
               <li className="flex items-center gap-1.5">
                 <span className="h-0 w-4 border-t-2 border-dashed" style={{ borderColor: risk!.ink }} />
@@ -485,7 +509,9 @@ export function FridgeDetailPage() {
                       key: 'late',
                       header: 'Arrival',
                       cell: (r) =>
-                        r.late ? (
+                        r.seeded ? (
+                          <span className="text-ink-3">seeded</span>
+                        ) : r.late ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-warning-wash px-2 py-0.5 text-xs font-semibold text-warning">
                             <CloudUpload aria-hidden className="size-3" />
                             late · synced

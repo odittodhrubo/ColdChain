@@ -534,14 +534,22 @@ class FridgeNode:
 
 # ---------------------------------------------------------- scenarios (timed scripts, seconds from start)
 
-# Actions: ("door", bool), ("power", None) toggles, ("wifi", bool), ("eff", float), ("temp", float)
+# Actions: ("door", bool), ("power", None) toggles, ("wifi", bool), ("eff", float), ("temp", float),
+# ("ajar", k_door or None)
+# Door left ajar on the nominal fridge: the heat gain at 7 °C is 5 % above the compressor's cooling, so the
+# temperature creeps past 8 °C over roughly a quarter of an hour (the forecaster's 10-minute warning case).
+AJAR_K = F["COOL_RATE_C_PER_S"] * 1.05 / (F["T_AMBIENT_C"] - 7.0) - F["K_LEAK_PER_S"]
 SCENARIOS: dict[str, list[tuple[float, str, object]]] = {
     "normal": [],
     "door_open": [(60, "door", True), (150, "door", False)],  # 90 s open: DOOR_ALARM after 60 s
     "power_fail": [(60, "power", None), (240, "power", None)],  # 3 min on battery
     "wifi_loss": [(120, "wifi", True), (240, "wifi", False)],  # 2 min up, 2 min down, then restore
     "heat_spike": [(60, "temp", 13.0), (60, "door", True), (240, "door", False)],  # x2 exposure for minutes
-    "weak_compressor": [(60, "eff", 0.4)],  # cooling below the leak at 7 C: slow breach (P17 health demo)
+    "weak_compressor": [(60, "eff", 0.4)],
+    "door_ajar": [
+        (60, "ajar", AJAR_K),
+        (60 + 40 * 60, "ajar", None),
+    ],  # cooling below the leak at 7 C: slow breach (P17 health demo)
     "full_demo": [
         (60, "door", True),
         (150, "door", False),
@@ -567,6 +575,11 @@ def apply_action(node: FridgeNode, action: str, arg) -> None:
         node.set_efficiency(float(arg))
     elif action == "temp":
         node.set_temp(float(arg))
+    elif (
+        action == "ajar"
+    ):  # door left ajar: the switch reads open, the gap leaks only `arg` per s (None: closed)
+        node.model.params["K_DOOR_PER_S"] = F["K_DOOR_PER_S"] if arg is None else float(arg)
+        node.set_door(arg is not None)
 
 
 def run_offline(

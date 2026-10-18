@@ -3,7 +3,7 @@
 PY ?= python
 COMPOSE = docker compose -f infra/docker-compose.yml
 
-.PHONY: setup env gen check up down logs test test-strict lint format seed demo data train
+.PHONY: setup env gen check up down logs test test-strict lint format seed demo data train scenarios security perf
 
 setup:            ## install node deps and the python venv
 	npm run setup
@@ -47,8 +47,17 @@ format:
 seed:
 	npm run seed
 
-demo:
+demo:             ## RESET the database, seed demo state + 6 h history, run broker/ML/backend/UI/nodes
 	npm run demo
+
+scenarios:        ## end-to-end S1-S10 + failure injection on an isolated stack (--full: spec durations)
+	npm run scenarios
+
+security:         ## dependency audit, secrets scan, live security probes
+	npm run check:security
+
+perf:             ## API p95 under 2 devices + flood
+	npm run check:perf
 
 data:             ## ML dataset: simulate 10 fridges x 60 days, build features, labels and DATASET_CARD.md
 	npm run ml:data

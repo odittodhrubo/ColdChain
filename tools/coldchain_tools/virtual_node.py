@@ -8,7 +8,7 @@ Timestamps come from the real clock: the server accepts only +-HMAC_WINDOW_S of 
 Use a device id the Wokwi node is not using at the same time: both would share one seq space.
 
 Interactive keys (type, then Enter): d door, p power, w wifi, e 0.6 efficiency, t 13 temperature,
-s status, q quit.
+s status, q quit. Scenarios include door_ajar (slow creep past 8 °C, the forecaster's early-warning case).
 """
 
 from __future__ import annotations
@@ -239,6 +239,71 @@ def _status(node: FridgeNode, up: Uplink) -> str:
     )
 
 
+class NodeRunner:
+    """One virtual node: the node, its uplink and its MQTT transport, advanced by step() (the CLI loop) or by
+    a background thread (start(): scenario tests, the demo). Actions are safe to call from another thread."""
+
+    def __init__(self, device_id: str, secret: str, url: str, username: str, password: str, prefix: str,
+                 thermal_speed: float = 1.0, seq_file: SeqFile | None = None):  # fmt: skip
+        self.node = FridgeNode(
+            device_id, seed=int(time.time()), start_seq=seq_file.start() if seq_file else 0,
+            thermal_speed=thermal_speed,
+        )  # fmt: skip
+        self.transport = MqttTransport(
+            url, username, password, f"{device_id}-virtual-{int(time.time() * 1000) % 1_000_000}",
+            topic(prefix, device_id, "status"),
+            [topic(prefix, device_id, "ack"), topic(prefix, device_id, "cmd")],
+        )  # fmt: skip
+        self.uplink = Uplink(self.node, secret, prefix, self.transport, seq_file)
+        self.seq_file = seq_file
+        self.lock = threading.Lock()
+        self._start = time.monotonic()
+        self._last = self._start
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+
+    def step(self) -> None:
+        with self.lock:
+            now = time.monotonic()
+            now_ms = int((now - self._start) * 1000)
+            self.uplink.deliver(self.node.tick(now_ms, now - self._last, lambda: int(time.time())))
+            self._last = now
+            while not self.transport.inbox.empty():
+                self.uplink.handle(*self.transport.inbox.get())
+            self.uplink.pump(now_ms)
+
+    def act(self, action: str, arg=None) -> None:
+        """A scenario action: door, power (toggle), wifi (outage on/off), eff, temp, ajar."""
+        with self.lock:
+            if action == "wifi":
+                self.uplink.outage = bool(arg)
+                self.transport.set_outage(bool(arg))
+            else:
+                apply_action(self.node, action, arg)
+
+    def status(self) -> str:
+        with self.lock:
+            return _status(self.node, self.uplink)
+
+    def start(self) -> NodeRunner:
+        def loop():
+            while not self._stop.is_set():
+                self.step()
+                time.sleep(0.1)
+
+        self._thread = threading.Thread(target=loop, daemon=True, name=f"node-{self.node.device_id}")
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+        if self.seq_file:
+            self.seq_file.save(self.node.seq)
+        self.transport.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fridge", default="fridge-01", help="device id (default fridge-01)")
@@ -256,19 +321,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     secret = args.secret or device_secret(args.fridge)
-    seq_file = SeqFile(args.fridge)
-    node = FridgeNode(
-        args.fridge, seed=int(time.time()), start_seq=seq_file.start(), thermal_speed=args.thermal_speed
-    )
-    transport = MqttTransport(
-        args.url,
-        args.username,
-        args.password,
-        f"{args.fridge}-virtual-{int(time.time()) % 100000}",
-        topic(args.prefix, args.fridge, "status"),
-        [topic(args.prefix, args.fridge, "ack"), topic(args.prefix, args.fridge, "cmd")],
-    )
-    uplink = Uplink(node, secret, args.prefix, transport, seq_file)
+    runner = NodeRunner(args.fridge, secret, args.url, args.username, args.password, args.prefix,
+                        args.thermal_speed, SeqFile(args.fridge))  # fmt: skip
     script = sorted(SCENARIOS[args.scenario], key=lambda a: a[0])
     duration = args.duration
     if duration is None and script:
@@ -278,25 +332,20 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=_stdin_lines, args=(keys,), daemon=True).start()
     print(
         f"virtual node {args.fridge} -> {args.url} prefix {args.prefix}, "
-        f"scenario {args.scenario}, seq from {node.seq}"
+        f"scenario {args.scenario}, seq from {runner.node.seq}"
     )
 
     start = time.monotonic()
-    last = start
     next_status = 0.0
     step = 0
+    keymap = {"d": ("door", None), "p": ("power", None), "w": ("wifi", None)}
     try:
         while duration is None or time.monotonic() - start < duration:
-            now = time.monotonic()
-            elapsed = now - start
+            elapsed = time.monotonic() - start
             while step < len(script) and script[step][0] <= elapsed:
                 _, action, arg = script[step]
                 print(f"[scenario] t={elapsed:.0f}s {action} {'' if arg is None else arg}")
-                if action == "wifi":
-                    uplink.outage = bool(arg)
-                    transport.set_outage(bool(arg))
-                else:
-                    apply_action(node, action, arg)
+                runner.act(action, arg)
                 step += 1
             while not keys.empty():
                 cmd = keys.get().split()
@@ -304,33 +353,24 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 if cmd[0] == "q":
                     return 0
-                if cmd[0] == "d":
-                    node.set_door(not node.door_open)
-                elif cmd[0] == "p":
-                    node.toggle_power()
-                elif cmd[0] == "w":
-                    uplink.outage = not uplink.outage
-                    transport.set_outage(uplink.outage)
+                if cmd[0] in keymap:
+                    action, _ = keymap[cmd[0]]
+                    arg = {"door": not runner.node.door_open, "wifi": not runner.uplink.outage}.get(action)
+                    runner.act(action, arg)
                 elif cmd[0] == "e" and len(cmd) == 2:
-                    node.set_efficiency(float(cmd[1]))
+                    runner.act("eff", float(cmd[1]))
                 elif cmd[0] == "t" and len(cmd) == 2:
-                    node.set_temp(float(cmd[1]))
-                print(_status(node, uplink))
-            now_ms = int(elapsed * 1000)
-            uplink.deliver(node.tick(now_ms, now - last, lambda: int(time.time())))
-            last = now
-            while not transport.inbox.empty():
-                uplink.handle(*transport.inbox.get())
-            uplink.pump(now_ms)
+                    runner.act("temp", float(cmd[1]))
+                print(runner.status())
+            runner.step()
             if elapsed >= next_status:
                 next_status = elapsed + C["TELEMETRY_PERIOD_S"]
-                print(_status(node, uplink))
+                print(runner.status())
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
     finally:
-        seq_file.save(node.seq)
-        transport.close()
+        runner.stop()
     return 0
 
 

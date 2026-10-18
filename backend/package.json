@@ -14,7 +14,9 @@
     "lint": "eslint . && tsc --noEmit",
     "format": "prettier --write .",
     "seed": "tsx src/scripts/seed.ts",
-    "demo": "node -e \"console.error('demo: not implemented yet (arrives in P20)'); process.exit(1)\""
+    "broker": "tsx src/scripts/broker.ts",
+    "docs:api": "tsx src/scripts/api-doc.ts",
+    "demo:seed": "tsx src/scripts/demo-seed.ts --reset"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -44,6 +46,7 @@
     "@types/pngjs": "^6.0.5",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.2.1",
+    "aedes": "^0.51.3",
     "eslint": "^10.13.0",
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",

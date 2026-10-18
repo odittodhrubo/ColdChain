@@ -74,7 +74,21 @@ export function securityRoutes(): RouteDef[] {
             active: number;
             last_seen_at: number | null;
           }[]
-        ).map((d) => ({ ...d, active: d.active === 1, open_gap: gaps.get(d.device_id) ?? null }));
+        ).map((d) => {
+          // clock skew = server receipt time - device timestamp on its last live reading (sync excluded):
+          // the usual cause of STALE_TS on demo day when a laptop, Wokwi or the broker host drifts
+          const last = db
+            .prepare(
+              'SELECT ts, received_at FROM readings WHERE device_id = ? AND late = 0 AND seeded = 0 ORDER BY id DESC LIMIT 1',
+            )
+            .get(d.device_id) as { ts: number; received_at: number } | undefined;
+          return {
+            ...d,
+            active: d.active === 1,
+            open_gap: gaps.get(d.device_id) ?? null,
+            clock_skew_s: last ? Math.round(last.received_at / 1000 - last.ts) : null,
+          };
+        });
         return {
           window_s: 3600,
           accepted,

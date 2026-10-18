@@ -138,3 +138,24 @@ def test_verify_envelope_cli(tmp_path, capsys):
     path.write_text(json.dumps(env))
     assert verify_envelope.main([str(path), "--secret", v["secret"], "--no-time"]) == 1
     assert "BAD_SIG" in capsys.readouterr().out
+
+
+def test_secret_scan_catches_real_values_and_ignores_placeholders():
+    from coldchain_tools.security_check import scan
+
+    hits: list[str] = []
+    scan(
+        "JWT_SECRET=change-me-long-random\nAPP_SECRET_KEY=32-byte-hex-for-encrypting-device-secrets\n",
+        "x",
+        hits,
+    )
+    scan("DEVICE_SECRET_FRIDGE_01=" + "ab" * 32 + "\n", "y", hits)  # repeated pattern: a test fixture
+    assert hits == []
+    # deterministic high-entropy values (hex and mixed base64): the two shapes RANDOM accepts
+    scan("DEVICE_SECRET_FRIDGE_01=" + "0a9f3c" * 11 + "\n", "leak", hits)
+    scan("JWT_SECRET=" + "aB3xZ9" * 8 + "\n", "leak2", hits)
+    # assembled at runtime so the full key never appears as a literal in this tracked file
+    scan("-----BEGIN PRIVATE KEY-----\n" + "MIIBVgIBADANBg" * 4 + "\n", "key", hits)
+    assert len(hits) == 3
+    scan("-----BEGIN PRIVATE KEY-----\n", "bare header, not a leak", hits)  # no key body
+    assert len(hits) == 3

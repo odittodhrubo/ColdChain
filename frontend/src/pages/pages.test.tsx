@@ -141,6 +141,13 @@ describe('inventory: what each role can do', () => {
     expect(within(row).queryByRole('button', { name: /^Move/ })).toBeNull();
   });
 
+  it('batch text is rendered as text, never as markup (stored XSS)', async () => {
+    const xss = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
+    inventory('INSPECTOR', [batch({ name: xss, manufacturer: xss })]);
+    const row = (await screen.findAllByText(xss))[0].closest('tr')!;
+    expect(row.querySelector('img, script')).toBeNull();
+  });
+
   it('the add form validates before sending', async () => {
     inventory('PHARMACIST', []);
     await userEvent.click(await screen.findByRole('button', { name: 'Add batch' }));

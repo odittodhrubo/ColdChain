@@ -17,7 +17,8 @@ interface FridgeRow {
 
 export type FridgeStatus = FridgeState | 'OFFLINE';
 
-const READING_COLS = 'seq, ts, temp, door, comp, power, batt, state, exp_s, latch, mode, late, received_at';
+const READING_COLS =
+  'seq, ts, temp, door, comp, power, batt, state, exp_s, latch, mode, late, seeded, received_at';
 
 function liveOf(ctx: AppContext, fridgeId: string, nowMs: number): LiveState | null {
   const live = ctx.ingest.live.get(fridgeId);
@@ -128,6 +129,7 @@ export function readingsHistory(
     .prepare(
       `SELECT (ts / CAST(@b AS INTEGER)) * CAST(@b AS INTEGER) AS ts, ROUND(AVG(temp), 2) AS temp, MIN(temp) AS min, MAX(temp) AS max,
               MAX(door) AS door, MAX(comp) AS comp, MAX(power = 'BATTERY') AS battery, MAX(late) AS late,
+              MAX(seeded) AS seeded,
               COUNT(*) AS n
        FROM readings WHERE fridge_id = @f AND ts >= @from AND ts <= @to
        GROUP BY ts / CAST(@b AS INTEGER) ORDER BY ts`,

@@ -98,6 +98,7 @@ export interface ReadingRow {
   batt: number;
   state: string;
   late: 0 | 1;
+  seeded?: 0 | 1;
   received_at: number;
 }
 

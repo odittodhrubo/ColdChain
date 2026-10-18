@@ -16,6 +16,11 @@ All commands below run from `tools/` with that venv's Python (`python -m coldcha
 | `tamper` | edits a row in the SQLite audit log or readings so Verify Integrity can catch it; `--restore` undoes it |
 | `verify_envelope` | checks one pasted envelope and names the failing check |
 | `envelope`, `contracts` | shared signing / verification and constants, topics, `.env` settings |
+| `backfill` | seeded history from the simulator straight into the database (`seeded=1`, labelled in the UI) |
+| `stack` | runs the whole system locally; `stack demo` is `make demo` |
+| `scenarios` | end-to-end scenarios S1–S10 and failure injection on an isolated stack (`make scenarios`) |
+| `security_check` | dependency audit, secrets scan of the tree and the history, live security probes (`make security`) |
+| `perf` | API latency under load: 2 devices, a flood, 24 h of history (`make perf`) |
 
 ## Simulation engine
 
@@ -45,6 +50,7 @@ It uses the same signed envelope, topics and bodies as the firmware, a retained 
 | `wifi_loss` | 2 min up, 2 min outage (buffering), then restore and sync |
 | `heat_spike` | temperature set to 13 °C and door open for 3 min (×2 exposure) |
 | `weak_compressor` | efficiency 0.4 at 60 s: slow breach for the health model (P17) |
+| `door_ajar` | door left ajar at 60 s: the switch reads open but the gap is small, so the temperature creeps past 8 °C over a quarter of an hour (the forecaster's early-warning case) |
 | `full_demo` | all of the above, one after another |
 
 Interactive keys (type, then Enter): `d` door, `p` power, `w` Wi-Fi outage, `e 0.6` efficiency, `t 13` temperature, `s` status, `q` quit.
@@ -93,3 +99,33 @@ It prints each server check in order (parse + fields, known device, timestamp wi
 ## Tests
 
 `python -m pytest -q` in `tools/` (also part of `make test`): the shared HMAC / status / exposure vectors, firmware-identical bodies, hysteresis and min-off with a fake clock, the thermal cycle, buffer capacity and a sync over a lossy link, the battery model and door alarm, fast mode running 24 h in seconds, every scenario, the virtual node against a fake broker (live, outage, ordered sync without gaps, resend with a fresh nonce, verified commands, rejected replay / bad signature / stale), seq persistence, every attack's rejection reason, the production and prefix guards, tamper and restore on a temporary database, and `verify_envelope`.
+
+## Demo stack, scenarios and checks (P20)
+
+`coldchain_tools.stack` starts what a full run needs and stops it all on Ctrl-C:
+- a local MQTT broker (`npm run broker`, aedes) when the configured one is local and not running;
+- the ML service, the backend and the web app;
+- a `NodeRunner` per fridge whose Wokwi node is not online. A `NodeRunner` is the virtual node's node, uplink and transport, driven by a thread.
+
+`stack demo` (`make demo`):
+- resets `DB_PATH` and runs `backend/src/scripts/demo-seed.ts` (users, fridges, eight batches in varied states);
+- backfills 6 h of seeded history;
+- prints the credentials and QR URLs.
+
+`coldchain_tools.scenarios` (`make scenarios`, about 15 min; `--full` uses the spec's durations and adds the door-ajar lead time, about 45 min):
+- It brings up its own stack on spare ports with a throwaway database and `DEMO_TIME_SCALE=60`, and drives virtual nodes.
+- It checks every outcome through the REST API, plus the database for ordering and duplicates.
+
+| | Checks |
+|---|---|
+| S1 | two fridges publish; temperatures stay within 2–8 °C; complete compressor cycles; no fridge alerts |
+| S2 | every `COMP_ON` at ≥ 7.0 °C and ≥ 60 s after the last `COMP_OFF`; every `COMP_OFF` at ≤ 3.0 °C |
+| S3 | door open: `DOOR_ALARM`, `DOOR_OPEN_LONG` alert within 5 s and delivered in-app, status WARNING → BREACH |
+| S4 | held at 9 °C / 13 °C: exposure ×1 / ×2; At risk, Discard at 0 % with the latch; reset refused for Inspector / Pharmacist, done by Admin; the QR still says Discard |
+| S5 | power cut: battery, compressor off, battery drains, alert; restore: alert resolved, restart honours the minimum off-time |
+| S6 | Wi-Fi outage: buffer grows, fridge shown OFFLINE; on reconnect every message arrives, seq contiguous, no duplicates, marked late, in order |
+| S7 | replay, bad signature, stale, unknown device, tampered body, flood: each rejected with its reason, listed, `SECURITY_FLOOD` raised, in the audit chain |
+| S8 | `tamper` an audit row: Verify Integrity red at that record; `--restore`: green |
+| S9 | every capability × every role (and anonymous) against the live server |
+| FI | ML down → fallback labelled stale, then the model again; broker down → nodes buffer, nothing lost after restart; backend down → it recovers and ingests again |
+| S10 | weak compressor: health < 70 and Weakening, `COMPRESSOR_WEAK`; plan proposed; Inspector refused; Pharmacist confirms; batches moved and audited. `--full` adds: door left ajar warns ≥ 10 min before 8 °C |

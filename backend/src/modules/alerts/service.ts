@@ -90,6 +90,7 @@ export function alertView(r: AlertRow) {
 export class AlertEngine {
   private readonly breach = new Map<string, number>(); // fridge -> consecutive out-of-range readings
   private readonly floods = new Map<string, number[]>(); // source -> reject times in the last minute
+  private readonly pending = new Set<Promise<unknown>>();
   private readonly sql;
 
   constructor(
@@ -208,7 +209,7 @@ export class AlertEngine {
       link: data.link,
       severity: (this.sql.byId.get(row.id) as AlertRow).severity,
     };
-    void this.notifier
+    const delivery = this.notifier
       .send(msg)
       .then((res) => {
         const status = { in_app: { status: 'sent', at: nowMs }, ...res, round };
@@ -217,7 +218,14 @@ export class AlertEngine {
       })
       .catch((err: Error) =>
         logger.error({ err: err.message, alertId: row.id }, 'alert delivery bookkeeping failed'),
-      );
+      )
+      .finally(() => this.pending.delete(delivery));
+    this.pending.add(delivery);
+  }
+
+  /** Resolves when every notification in flight has been recorded (scripts close the DB after this). */
+  async idle() {
+    while (this.pending.size) await Promise.allSettled([...this.pending]);
   }
 
   /** Job (every few seconds): door escalation, re-notification, flood windows ending. */
