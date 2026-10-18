@@ -1,0 +1,1064 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-18T01:25:18+00:00",
+  "title": "Design System: ColdChain",
+  "extensions": {
+    "colorMeta": {
+      "teal": {
+        "role": "primary",
+        "displayName": "Monitor Teal",
+        "canonical": "#0f766e",
+        "oklch": "oklch(51.1% 0.086 186.4)",
+        "tonalRamp": [
+          "#000f0d",
+          "#002b27",
+          "#054a45",
+          "#166c64",
+          "#338e85",
+          "#58b0a7",
+          "#7fd7cd",
+          "#b9fef6"
+        ]
+      },
+      "teal-strong": {
+        "role": "primary",
+        "displayName": "Deep Teal",
+        "canonical": "#0b5e57",
+        "oklch": "oklch(43.5% 0.073 185.8)",
+        "tonalRamp": [
+          "#000f0d",
+          "#032b27",
+          "#0e4a44",
+          "#1f6b64",
+          "#448c83",
+          "#66aea5",
+          "#8cd4cb",
+          "#bdfef5"
+        ]
+      },
+      "teal-wash": {
+        "role": "primary",
+        "displayName": "Teal Wash",
+        "canonical": "#e3f4f1",
+        "oklch": "oklch(95.4% 0.018 184.3)",
+        "tonalRamp": [
+          "#030e0c",
+          "#1a2725",
+          "#354341",
+          "#53615f",
+          "#72817e",
+          "#92a2a0",
+          "#b8c8c5",
+          "#e2f3f0"
+        ]
+      },
+      "on-teal": {
+        "role": "primary",
+        "displayName": "On Teal",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#7d7d7d",
+          "#9e9e9e",
+          "#c4c4c4",
+          "#eeeeee"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Slate Ground",
+        "canonical": "#eef2f6",
+        "oklch": "oklch(95.9% 0.007 247.9)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212427",
+          "#3d4043",
+          "#5b5e61",
+          "#7a7e81",
+          "#9b9fa3",
+          "#c1c5c8",
+          "#ebeff3"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Label Stock",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#7d7d7d",
+          "#9e9e9e",
+          "#c4c4c4",
+          "#eeeeee"
+        ]
+      },
+      "panel-2": {
+        "role": "neutral",
+        "displayName": "Rail Stock",
+        "canonical": "#f6f8fa",
+        "oklch": "oklch(97.8% 0.003 247.9)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232426",
+          "#3e4041",
+          "#5c5e5f",
+          "#7c7d7f",
+          "#9d9fa0",
+          "#c2c4c6",
+          "#edeff1"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline Rule",
+        "canonical": "#d5dde6",
+        "oklch": "oklch(89.4% 0.015 251.2)",
+        "tonalRamp": [
+          "#070c11",
+          "#1f252b",
+          "#3a4048",
+          "#585e66",
+          "#777e86",
+          "#989fa8",
+          "#bdc5ce",
+          "#e7eff9"
+        ]
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Strong Rule",
+        "canonical": "#b6c2cf",
+        "oklch": "oklch(80.9% 0.023 250.3)",
+        "tonalRamp": [
+          "#050c14",
+          "#1c252f",
+          "#37414c",
+          "#545f6a",
+          "#737f8b",
+          "#94a0ac",
+          "#bac6d3",
+          "#e4f0fe"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Label Ink",
+        "canonical": "#0f1b2a",
+        "oklch": "oklch(21.9% 0.034 254.6)",
+        "tonalRamp": [
+          "#030b19",
+          "#182534",
+          "#334152",
+          "#515f71",
+          "#707f92",
+          "#90a0b4",
+          "#b5c6db",
+          "#e5f0fe"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#44546a",
+        "oklch": "oklch(44.1% 0.042 256.4)",
+        "tonalRamp": [
+          "#020b1c",
+          "#162538",
+          "#314156",
+          "#4e5f75",
+          "#6d7f96",
+          "#8ea0b9",
+          "#b3c6df",
+          "#e5effe"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#5b6b80",
+        "oklch": "oklch(52.2% 0.039 255.3)",
+        "tonalRamp": [
+          "#020b1b",
+          "#172536",
+          "#324154",
+          "#4f5f73",
+          "#6e7f94",
+          "#8fa0b7",
+          "#b4c6dd",
+          "#e5f0fe"
+        ]
+      },
+      "safe": {
+        "role": "secondary",
+        "displayName": "Safe Green",
+        "canonical": "#15803d",
+        "oklch": "oklch(52.7% 0.137 150.1)",
+        "tonalRamp": [
+          "#010f04",
+          "#052c12",
+          "#034e21",
+          "#147035",
+          "#31934f",
+          "#57b66f",
+          "#7edd94",
+          "#c8ffd2"
+        ]
+      },
+      "safe-wash": {
+        "role": "secondary",
+        "displayName": "Safe Green Wash",
+        "canonical": "#e8f6ec",
+        "oklch": "oklch(96.0% 0.020 154.9)",
+        "tonalRamp": [
+          "#050e08",
+          "#1d2720",
+          "#38433b",
+          "#556159",
+          "#748178",
+          "#95a299",
+          "#bbc8bf",
+          "#e5f3e9"
+        ]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "Amber Warning",
+        "canonical": "#a35400",
+        "oklch": "oklch(53.1% 0.130 56.0)",
+        "tonalRamp": [
+          "#160700",
+          "#3a1a01",
+          "#613207",
+          "#8e4801",
+          "#b66620",
+          "#db8747",
+          "#feb077",
+          "#fdeade"
+        ]
+      },
+      "warning-wash": {
+        "role": "secondary",
+        "displayName": "Amber Warning Wash",
+        "canonical": "#fdf3e2",
+        "oklch": "oklch(96.7% 0.025 81.1)",
+        "tonalRamp": [
+          "#100a02",
+          "#2a2316",
+          "#473f31",
+          "#655c4e",
+          "#857c6d",
+          "#a69d8d",
+          "#ccc3b2",
+          "#f7eddc"
+        ]
+      },
+      "breach": {
+        "role": "secondary",
+        "displayName": "Breach Red",
+        "canonical": "#c0262d",
+        "oklch": "oklch(52.7% 0.189 24.7)",
+        "tonalRamp": [
+          "#1e0001",
+          "#490308",
+          "#780f16",
+          "#af0c1f",
+          "#d73f40",
+          "#fe6460",
+          "#ffaba4",
+          "#fee9e7"
+        ]
+      },
+      "breach-wash": {
+        "role": "secondary",
+        "displayName": "Breach Red Wash",
+        "canonical": "#fdeceb",
+        "oklch": "oklch(95.6% 0.019 21.6)",
+        "tonalRamp": [
+          "#120808",
+          "#2c2120",
+          "#493c3b",
+          "#685a59",
+          "#887978",
+          "#aa9a99",
+          "#d0c0bf",
+          "#fbeae9"
+        ]
+      },
+      "atrisk": {
+        "role": "secondary",
+        "displayName": "At-Risk Orange",
+        "canonical": "#c2410c",
+        "oklch": "oklch(55.3% 0.174 38.4)",
+        "tonalRamp": [
+          "#1b0300",
+          "#431001",
+          "#6f2306",
+          "#9c3915",
+          "#cf4d1e",
+          "#f67145",
+          "#fead93",
+          "#feeae3"
+        ]
+      },
+      "atrisk-wash": {
+        "role": "secondary",
+        "displayName": "At-Risk Orange Wash",
+        "canonical": "#fff0e6",
+        "oklch": "oklch(96.4% 0.021 56.1)",
+        "tonalRamp": [
+          "#120904",
+          "#2c211a",
+          "#493d35",
+          "#675b52",
+          "#887a71",
+          "#a99b92",
+          "#cfc1b7",
+          "#faebe1"
+        ]
+      },
+      "discard": {
+        "role": "secondary",
+        "displayName": "Discard Oxblood",
+        "canonical": "#3d0d10",
+        "oklch": "oklch(24.5% 0.075 21.2)",
+        "tonalRamp": [
+          "#1f0002",
+          "#411113",
+          "#612e2e",
+          "#834c4b",
+          "#a56b6a",
+          "#c98c8a",
+          "#f1b1af",
+          "#fee9e8"
+        ]
+      },
+      "discard-wash": {
+        "role": "secondary",
+        "displayName": "Discard Oxblood Wash",
+        "canonical": "#f3e3e3",
+        "oklch": "oklch(92.9% 0.018 17.5)",
+        "tonalRamp": [
+          "#120808",
+          "#2c2121",
+          "#493c3c",
+          "#675a5a",
+          "#877979",
+          "#a99a9a",
+          "#cfc0c0",
+          "#faeaea"
+        ]
+      },
+      "offline": {
+        "role": "secondary",
+        "displayName": "Offline Slate",
+        "canonical": "#5b6b80",
+        "oklch": "oklch(52.2% 0.039 255.3)",
+        "tonalRamp": [
+          "#020b1b",
+          "#172536",
+          "#324154",
+          "#4f5f73",
+          "#6e7f94",
+          "#8fa0b7",
+          "#b4c6dd",
+          "#e5f0fe"
+        ]
+      },
+      "offline-wash": {
+        "role": "secondary",
+        "displayName": "Offline Slate Wash",
+        "canonical": "#edf1f5",
+        "oklch": "oklch(95.6% 0.007 247.9)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212427",
+          "#3d4043",
+          "#5b5e61",
+          "#7a7e81",
+          "#9b9fa3",
+          "#c1c5c8",
+          "#ebeff3"
+        ]
+      },
+      "demo": {
+        "role": "tertiary",
+        "displayName": "Disclosure Violet",
+        "canonical": "#6d28d9",
+        "oklch": "oklch(49.1% 0.241 292.6)",
+        "tonalRamp": [
+          "#0f002a",
+          "#2b0260",
+          "#4a0d9a",
+          "#6a23d5",
+          "#884ffc",
+          "#a389f7",
+          "#c5b9fc",
+          "#eeecfe"
+        ]
+      },
+      "on-demo": {
+        "role": "tertiary",
+        "displayName": "On Demo",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#7d7d7d",
+          "#9e9e9e",
+          "#c4c4c4",
+          "#eeeeee"
+        ]
+      },
+      "teal-dark": {
+        "role": "primary",
+        "displayName": "Monitor Teal (dark)",
+        "canonical": "#2dc6b5",
+        "oklch": "oklch(74.7% 0.124 183.5)",
+        "tonalRamp": [
+          "#000f0c",
+          "#042b26",
+          "#004b43",
+          "#0f6c62",
+          "#179083",
+          "#04b7a6",
+          "#4fdecc",
+          "#bdfef3"
+        ]
+      },
+      "teal-strong-dark": {
+        "role": "primary",
+        "displayName": "Deep Teal (dark)",
+        "canonical": "#5fd8ca",
+        "oklch": "oklch(81.0% 0.110 185.0)",
+        "tonalRamp": [
+          "#000f0d",
+          "#042b27",
+          "#004b44",
+          "#106c63",
+          "#179085",
+          "#34b4a7",
+          "#63dbcd",
+          "#bdfdf4"
+        ]
+      },
+      "teal-wash-dark": {
+        "role": "primary",
+        "displayName": "Teal Wash (dark)",
+        "canonical": "#0f2e2e",
+        "oklch": "oklch(27.8% 0.036 195.3)",
+        "tonalRamp": [
+          "#010e0e",
+          "#0a2929",
+          "#274646",
+          "#456464",
+          "#648484",
+          "#85a6a5",
+          "#aacccb",
+          "#d4f7f6"
+        ]
+      },
+      "on-teal-dark": {
+        "role": "primary",
+        "displayName": "On Teal (dark)",
+        "canonical": "#04211e",
+        "oklch": "oklch(22.5% 0.035 185.5)",
+        "tonalRamp": [
+          "#000f0d",
+          "#0d2a26",
+          "#294642",
+          "#476460",
+          "#668480",
+          "#87a6a1",
+          "#acccc7",
+          "#d5f7f2"
+        ]
+      },
+      "ground-dark": {
+        "role": "neutral",
+        "displayName": "Slate Ground (dark)",
+        "canonical": "#0a121c",
+        "oklch": "oklch(18.0% 0.024 254.4)",
+        "tonalRamp": [
+          "#050c15",
+          "#1c2530",
+          "#37414d",
+          "#555f6b",
+          "#747e8c",
+          "#95a0ae",
+          "#bac5d4",
+          "#e4f0ff"
+        ]
+      },
+      "panel-dark": {
+        "role": "neutral",
+        "displayName": "Label Stock (dark)",
+        "canonical": "#111c29",
+        "oklch": "oklch(22.3% 0.030 253.2)",
+        "tonalRamp": [
+          "#030c17",
+          "#1a2532",
+          "#354150",
+          "#525f6f",
+          "#717f8f",
+          "#92a0b1",
+          "#b7c6d8",
+          "#e5f0fd"
+        ]
+      },
+      "panel-2-dark": {
+        "role": "neutral",
+        "displayName": "Rail Stock (dark)",
+        "canonical": "#0e1823",
+        "oklch": "oklch(20.5% 0.027 251.5)",
+        "tonalRamp": [
+          "#040c16",
+          "#1b2531",
+          "#36414e",
+          "#535f6c",
+          "#727f8d",
+          "#93a0af",
+          "#b8c6d5",
+          "#e3f0ff"
+        ]
+      },
+      "rule-dark": {
+        "role": "neutral",
+        "displayName": "Hairline Rule (dark)",
+        "canonical": "#24344a",
+        "oklch": "oklch(32.2% 0.045 256.5)",
+        "tonalRamp": [
+          "#010b1e",
+          "#152539",
+          "#304157",
+          "#4d5f77",
+          "#6c7f98",
+          "#8da0bb",
+          "#b2c6e2",
+          "#e4f0ff"
+        ]
+      },
+      "rule-strong-dark": {
+        "role": "neutral",
+        "displayName": "Strong Rule (dark)",
+        "canonical": "#34486a",
+        "oklch": "oklch(40.1% 0.063 260.6)",
+        "tonalRamp": [
+          "#000825",
+          "#112342",
+          "#2c4061",
+          "#495e81",
+          "#687ea3",
+          "#889fc6",
+          "#adc5ee",
+          "#e6effe"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Label Ink (dark)",
+        "canonical": "#e7eef6",
+        "oklch": "oklch(94.6% 0.013 251.6)",
+        "tonalRamp": [
+          "#070c11",
+          "#1f252a",
+          "#3b4047",
+          "#585e65",
+          "#787e85",
+          "#999fa7",
+          "#bec5cd",
+          "#e8eff7"
+        ]
+      },
+      "ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Ink 2 (dark)",
+        "canonical": "#aab8c8",
+        "oklch": "oklch(77.7% 0.028 251.7)",
+        "tonalRamp": [
+          "#040c16",
+          "#1a2531",
+          "#35414e",
+          "#525f6d",
+          "#727f8e",
+          "#92a0b0",
+          "#b8c6d6",
+          "#e4f0fe"
+        ]
+      },
+      "ink-3-dark": {
+        "role": "neutral",
+        "displayName": "Ink 3 (dark)",
+        "canonical": "#8d9db0",
+        "oklch": "oklch(69.0% 0.033 252.8)",
+        "tonalRamp": [
+          "#030c19",
+          "#182534",
+          "#334151",
+          "#505f70",
+          "#6f7f91",
+          "#90a0b3",
+          "#b5c6da",
+          "#e3f0ff"
+        ]
+      },
+      "safe-dark": {
+        "role": "secondary",
+        "displayName": "Safe Green (dark)",
+        "canonical": "#4ade80",
+        "oklch": "oklch(80.0% 0.182 151.7)",
+        "tonalRamp": [
+          "#010f04",
+          "#042c13",
+          "#024d24",
+          "#127039",
+          "#1b954e",
+          "#11bd61",
+          "#52e586",
+          "#c8fed5"
+        ]
+      },
+      "safe-wash-dark": {
+        "role": "secondary",
+        "displayName": "Safe Green Wash (dark)",
+        "canonical": "#0f2a1a",
+        "oklch": "oklch(25.8% 0.045 155.4)",
+        "tonalRamp": [
+          "#000f05",
+          "#0f2a1a",
+          "#2c4735",
+          "#496553",
+          "#688672",
+          "#89a793",
+          "#aecdb8",
+          "#d8f8e2"
+        ]
+      },
+      "warning-dark": {
+        "role": "secondary",
+        "displayName": "Amber Warning (dark)",
+        "canonical": "#fbbf4a",
+        "oklch": "oklch(83.9% 0.146 80.7)",
+        "tonalRamp": [
+          "#120a00",
+          "#312102",
+          "#533b0a",
+          "#795708",
+          "#a1740d",
+          "#c89429",
+          "#f5b943",
+          "#ffeccc"
+        ]
+      },
+      "warning-wash-dark": {
+        "role": "secondary",
+        "displayName": "Amber Warning Wash (dark)",
+        "canonical": "#2e2310",
+        "oklch": "oklch(26.4% 0.035 80.0)",
+        "tonalRamp": [
+          "#120900",
+          "#2d220f",
+          "#4a3e2a",
+          "#685c47",
+          "#897b66",
+          "#aa9c86",
+          "#d0c2ab",
+          "#fbecd5"
+        ]
+      },
+      "breach-dark": {
+        "role": "secondary",
+        "displayName": "Breach Red (dark)",
+        "canonical": "#ff7a7a",
+        "oklch": "oklch(73.5% 0.163 21.9)",
+        "tonalRamp": [
+          "#1e0102",
+          "#48060d",
+          "#7b0319",
+          "#a62731",
+          "#cc4c50",
+          "#f36f70",
+          "#fcaba8",
+          "#ffe9e7"
+        ]
+      },
+      "breach-wash-dark": {
+        "role": "secondary",
+        "displayName": "Breach Red Wash (dark)",
+        "canonical": "#351416",
+        "oklch": "oklch(24.3% 0.053 18.1)",
+        "tonalRamp": [
+          "#1d0104",
+          "#3a181a",
+          "#593435",
+          "#795152",
+          "#9b7171",
+          "#bd9292",
+          "#e5b7b7",
+          "#fee9e9"
+        ]
+      },
+      "atrisk-dark": {
+        "role": "secondary",
+        "displayName": "At-Risk Orange (dark)",
+        "canonical": "#fb9a5a",
+        "oklch": "oklch(77.4% 0.141 52.6)",
+        "tonalRamp": [
+          "#180600",
+          "#3a1a04",
+          "#642f02",
+          "#8e4810",
+          "#bc6118",
+          "#e18342",
+          "#ffaf7d",
+          "#feeadf"
+        ]
+      },
+      "atrisk-wash-dark": {
+        "role": "secondary",
+        "displayName": "At-Risk Orange Wash (dark)",
+        "canonical": "#33190c",
+        "oklch": "oklch(24.7% 0.047 46.3)",
+        "tonalRamp": [
+          "#190500",
+          "#371c0f",
+          "#55382a",
+          "#745647",
+          "#967566",
+          "#b89686",
+          "#dfbbab",
+          "#feeae1"
+        ]
+      },
+      "discard-dark": {
+        "role": "secondary",
+        "displayName": "Discard Oxblood (dark)",
+        "canonical": "#ffb4b4",
+        "oklch": "oklch(84.1% 0.088 19.1)",
+        "tonalRamp": [
+          "#1e0103",
+          "#450a12",
+          "#66292d",
+          "#88484a",
+          "#ab6768",
+          "#cf8889",
+          "#f8adae",
+          "#ffe8e8"
+        ]
+      },
+      "discard-wash-dark": {
+        "role": "secondary",
+        "displayName": "Discard Oxblood Wash (dark)",
+        "canonical": "#2a0c0e",
+        "oklch": "oklch(20.5% 0.050 18.6)",
+        "tonalRamp": [
+          "#1c0204",
+          "#39191a",
+          "#573535",
+          "#775253",
+          "#997272",
+          "#bc9292",
+          "#e3b8b8",
+          "#fee9e8"
+        ]
+      },
+      "offline-dark": {
+        "role": "secondary",
+        "displayName": "Offline Slate (dark)",
+        "canonical": "#9aa8b8",
+        "oklch": "oklch(72.6% 0.028 251.7)",
+        "tonalRamp": [
+          "#040c17",
+          "#1a2531",
+          "#35414e",
+          "#525f6d",
+          "#717f8e",
+          "#92a0b0",
+          "#b7c6d6",
+          "#e4f0fe"
+        ]
+      },
+      "offline-wash-dark": {
+        "role": "secondary",
+        "displayName": "Offline Slate Wash (dark)",
+        "canonical": "#1a2533",
+        "oklch": "oklch(26.1% 0.031 254.8)",
+        "tonalRamp": [
+          "#030b18",
+          "#1a2533",
+          "#354150",
+          "#525f6f",
+          "#717f90",
+          "#92a0b2",
+          "#b7c6d8",
+          "#e5f0fe"
+        ]
+      },
+      "demo-dark": {
+        "role": "tertiary",
+        "displayName": "Disclosure Violet (dark)",
+        "canonical": "#7c3aed",
+        "oklch": "oklch(54.1% 0.247 293.0)",
+        "tonalRamp": [
+          "#0e0128",
+          "#2a085c",
+          "#4b089c",
+          "#6c1ed7",
+          "#8a4cfe",
+          "#a488f9",
+          "#c6b9fd",
+          "#efecfe"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Login story line only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel titles; modal and empty-state titles at 1rem."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text, cells, menus, helpers."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase table column heads only."
+      },
+      "figures": {
+        "displayName": "Figures",
+        "purpose": "Readings, counts, lots: tabular numerals."
+      }
+    },
+    "shadows": [
+      {
+        "name": "label-lift",
+        "value": "0 1px 2px rgb(15 27 42 / 0.05)",
+        "purpose": "Resting panels and the login card."
+      },
+      {
+        "name": "toast",
+        "value": "0 8px 24px rgb(15 27 42 / 0.14)",
+        "purpose": "Toasts."
+      },
+      {
+        "name": "floating-menu",
+        "value": "0 12px 32px rgb(15 27 42 / 0.18)",
+        "purpose": "User menu and bottom-bar More menu."
+      },
+      {
+        "name": "modal",
+        "value": "0 18px 48px rgb(15 27 42 / 0.22)",
+        "purpose": "Native dialog, over a rgb(10 18 28 / 0.45) backdrop."
+      },
+      {
+        "name": "focus-ring",
+        "value": "outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px",
+        "purpose": "Global :focus-visible."
+      }
+    ],
+    "motion": [
+      {
+        "name": "vvm-pulse",
+        "value": "scale 1 to 1.22 to 1, 420ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Once, when a VVM mark changes status; never on mount."
+      },
+      {
+        "name": "control-transition",
+        "value": "150ms on background-color, border-color, color, transform",
+        "purpose": "Buttons and nav state changes."
+      },
+      {
+        "name": "skeleton",
+        "value": "opacity to 0.55, 1.4s ease-in-out infinite",
+        "purpose": "Loading placeholders."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "all animation and transition 1ms",
+        "purpose": "prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Teal action: the main thing to do on a screen.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Sign in</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: background-color 150ms, border-color 150ms, color 150ms, transform 150ms; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-btn:focus-visible { outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; } .ds-btn-primary { background: var(--teal, #0f766e); border-color: var(--teal, #0f766e); color: var(--on-teal, #fff); } .ds-btn-primary:hover { background: var(--teal-strong, #0b5e57); border-color: var(--teal-strong, #0b5e57); } .ds-btn-primary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Label-stock button for secondary actions (retry, cancel).",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Try again</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: background-color 150ms, border-color 150ms, color 150ms, transform 150ms; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-btn:focus-visible { outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; } .ds-btn-secondary { background: var(--panel, #fff); border-color: var(--rule-strong, #b6c2cf); color: var(--ink, #0f1b2a); } .ds-btn-secondary:hover { background: var(--panel-2, #f6f8fa); border-color: var(--ink-3, #5b6b80); } .ds-btn-secondary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Quiet tertiary action.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\">Dismiss</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: background-color 150ms, border-color 150ms, color 150ms, transform 150ms; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-btn:focus-visible { outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; } .ds-btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2, #44546a); } .ds-btn-ghost:hover { background: var(--panel-2, #f6f8fa); color: var(--ink, #0f1b2a); }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Visible label, 44px label-stock box, message slot beneath.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\" for=\"ds-email\">Email</label><div class=\"ds-field-box\"><input id=\"ds-email\" class=\"ds-field-input\" type=\"email\" placeholder=\"name@clinic.org\"></div><p class=\"ds-field-hint\">Use your ColdChain staff account.</p></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-field-label { font-size: 0.875rem; font-weight: 600; color: var(--ink, #0f1b2a); } .ds-field-box { display: flex; align-items: center; min-height: 44px; background: var(--panel, #fff); border: 1px solid var(--rule-strong, #b6c2cf); border-radius: 6px; transition: border-color 150ms; } .ds-field-box:hover { border-color: var(--ink-3, #5b6b80); } .ds-field-box:focus-within { border-color: var(--teal, #0f766e); outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; } .ds-field-input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 8px 12px; font: inherit; font-size: 0.95rem; color: var(--ink, #0f1b2a); outline: none; caret-color: var(--teal, #0f766e); } .ds-field-input::placeholder { color: var(--ink-3, #5b6b80); } .ds-field-hint { margin: 0; font-size: 0.875rem; color: var(--ink-3, #5b6b80); }"
+    },
+    {
+      "name": "Status Chips",
+      "kind": "chip",
+      "refersTo": "status-chip-safe",
+      "description": "The fixed status vocabulary: ink on wash, VVM mark, word. DISCARD is struck.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip\" style=\"color: var(--safe, #15803d); background-color: var(--safe-wash, #e8f6ec); border-color: color-mix(in oklab, var(--safe, #15803d) 35%, transparent);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"0.24\"/></svg>Safe</span><span class=\"ds-chip\" style=\"color: var(--warning, #a35400); background-color: var(--warning-wash, #fdf3e2); border-color: color-mix(in oklab, var(--warning, #a35400) 35%, transparent);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"0.53\"/></svg>Warning</span><span class=\"ds-chip\" style=\"color: var(--breach, #c0262d); background-color: var(--breach-wash, #fdeceb); border-color: color-mix(in oklab, var(--breach, #c0262d) 35%, transparent);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"0.87\"/></svg>Breach</span><span class=\"ds-chip\" style=\"color: var(--atrisk, #c2410c); background-color: var(--atrisk-wash, #fff0e6); border-color: color-mix(in oklab, var(--atrisk, #c2410c) 35%, transparent);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"0.85\"/></svg>At risk</span><span class=\"ds-chip\" style=\"color: var(--discard, #3d0d10); background-color: var(--discard-wash, #f3e3e3); border-color: color-mix(in oklab, var(--discard, #3d0d10) 35%, transparent); background-image: repeating-linear-gradient(-45deg, color-mix(in oklab, var(--discard, #3d0d10) 16%, transparent) 0 2px, transparent 2px 7px);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"1\"/></svg>Discard</span><span class=\"ds-chip\" style=\"color: var(--offline, #5b6b80); background-color: var(--offline-wash, #edf1f5); border-color: color-mix(in oklab, var(--offline, #5b6b80) 35%, transparent);\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-dasharray=\"2 2\"/></svg>Offline</span></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; white-space: nowrap; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Label-stock container with optional header row. Never nested.",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-panel-head\"><h2 class=\"ds-panel-title\">Fridge 01</h2></header><div class=\"ds-panel-body\">4.6 °C, door closed, compressor idle.</div></section>",
+      "css": ".ds-panel { background: var(--panel, #fff); border: 1px solid var(--rule, #d5dde6); border-radius: 6px; box-shadow: 0 1px 2px rgb(15 27 42 / 0.05); color: var(--ink, #0f1b2a); font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-panel-head { display: flex; align-items: center; min-height: 48px; padding: 8px 16px; border-bottom: 1px solid var(--rule, #d5dde6); } .ds-panel-title { margin: 0; font-size: 0.95rem; font-weight: 600; } .ds-panel-body { padding: 16px; font-size: 0.875rem; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Label Rail Nav",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Desktop sidebar items; active is teal wash.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-rail-item is-active\" href=\"#\">Dashboard</a><a class=\"ds-rail-item\" href=\"#\">Fridges</a><a class=\"ds-rail-item\" href=\"#\">Alerts</a></nav>",
+      "css": ".ds-rail { display: flex; flex-direction: column; gap: 2px; width: 240px; padding: 12px; background: var(--panel-2, #f6f8fa); border-right: 1px solid var(--rule, #d5dde6); font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-rail-item { display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 6px; font-size: 0.875rem; font-weight: 500; color: var(--ink-2, #44546a); text-decoration: none; transition: background-color 150ms, color 150ms; } .ds-rail-item:hover { background: var(--panel, #fff); color: var(--ink, #0f1b2a); } .ds-rail-item.is-active { background: var(--teal-wash, #e3f4f1); color: var(--teal-strong, #0b5e57); } .ds-rail-item:focus-visible { outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; }"
+    },
+    {
+      "name": "Global Status Pill",
+      "kind": "custom",
+      "refersTo": "status-chip-breach",
+      "description": "Top-bar summary of open alerts: VVM mark at 20px plus words, links to Alerts.",
+      "html": "<a class=\"ds-pill\" href=\"#\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\"/><rect x=\"7.5\" y=\"7.5\" width=\"9\" height=\"9\" fill=\"currentColor\" fill-opacity=\"0.87\"/></svg>3 open alerts, 2 critical</a>",
+      "css": ".ds-pill { --pill-ink: var(--breach, #c0262d); display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 1px solid color-mix(in oklab, var(--pill-ink) 40%, transparent); border-radius: 9999px; background: color-mix(in oklab, var(--pill-ink) 9%, var(--panel, #fff)); color: var(--pill-ink); font-size: 0.875rem; font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: none; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); } .ds-pill:focus-visible { outline: 2px solid var(--focus, #0f766e); outline-offset: 2px; }"
+    },
+    {
+      "name": "Demo Banner",
+      "kind": "custom",
+      "refersTo": "demo-banner",
+      "description": "Violet disclosure strip above the top bar whenever time is accelerated.",
+      "html": "<div class=\"ds-demo\" role=\"note\">DEMO MODE — heat exposure accelerated ×30</div>",
+      "css": ".ds-demo { display: flex; justify-content: center; padding: 6px 16px; background: var(--demo, #6d28d9); color: var(--on-demo, #fff); font-size: 0.875rem; font-weight: 600; font-family: var(--font-sans, 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Vial Monitor Label",
+    "overview": "ColdChain is built from label stock. Cool white panels sit on a pale slate ground like adhesive labels on a fridge door, cut with a small die-cut corner and edged by a single 1px slate rule. Teal ink marks what you can act on and where you are; everything else stays quiet slate so that status can be loud when it has to be.\n\nStatus is read the way a nurse reads a vaccine vial monitor: a square inside a circle, the square darkening as the heat budget is used. That mark is both the logo and the status glyph, and every status in the product travels as colour plus mark plus word. The density is operational: a clinic PC and a night-shift wall monitor, desktop first, still whole at 360px. Light and dark are one system with remapped values; dark exists for the wall monitor, not as a mood.\n\nThe world refuses the generic IoT dashboard: no grid of KPI cards with sparklines standing in for state.",
+    "keyCharacteristics": [
+      "Label-stock panels on a slate ground, 1px rules, 6px die-cut corners.",
+      "Teal is the only action and selection ink; status inks never double as actions.",
+      "Every status is colour + VVM mark + word, never colour alone.",
+      "One workhorse face, Public Sans, with tabular figures for readings.",
+      "Calm at rest; motion only when a status actually changes."
+    ],
+    "rules": [
+      {
+        "name": "The Three-Signal Rule",
+        "body": "A status is never colour alone: it is the status ink, the VVM mark (or a distinct lucide glyph for connection state), and a word. Where width forces the word out, it moves to `sr-only`, not away.",
+        "section": "colors"
+      },
+      {
+        "name": "The Teal-Is-Action Rule",
+        "body": "Teal means \"act here\" or \"you are here\". It never signals a status, and status inks never fill a primary action except Breach Red on a destructive confirm.",
+        "section": "colors"
+      },
+      {
+        "name": "The Wash Pairing Rule",
+        "body": "Status ink sits on its own wash (chips) or on a 9 % mix of the ink into panel (the global status pill), with a border of the ink at 35 to 40 % opacity. Every ink-on-wash pair holds 4.5:1 or better in both themes.",
+        "section": "colors"
+      },
+      {
+        "name": "The Violet Disclosure Rule",
+        "body": "Disclosure Violet appears only on the demo-mode banner, full width, above the top bar, on every screen while time is accelerated.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Workhorse Rule",
+        "body": "Public Sans is the only family. Readings, counts, lot numbers and alert counts use tabular figures (`.figures`) so columns and live numbers do not jitter.",
+        "section": "typography"
+      },
+      {
+        "name": "The Label-On-Surface Rule",
+        "body": "Resting surfaces get the hairline label lift and nothing heavier; only things that float above the page (menus, toasts, dialogs) get diffuse shadows. No hard offset shadows.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Die-Cut Rule",
+        "body": "Containers and controls are 6px, status is round. Nothing in between, nothing sharper, nothing softer.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Strike Rule",
+        "body": "DISCARD is permanent and looks crossed out: a -45° repeating strike (2px ink at 16 % every 7px) over its wash, and the diagonal cut in its mark.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Pulse-On-Change Rule",
+        "body": "Motion is a signal: the only attention motion is the single VVM pulse on a real status change. Reduced motion collapses all animation to 1ms.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do put every status through the shared vocabulary: status ink + VVM mark + word, from one source of truth.",
+      "Do use Monitor Teal for primary actions, selection, focus and the logo, and only for those.",
+      "Do keep containers and controls at the 6px die-cut corner and status shapes fully round.",
+      "Do set readings, counts and lot numbers in tabular figures.",
+      "Do show the demo-mode banner in Disclosure Violet on every screen whenever heat exposure is accelerated.",
+      "Do show connection state (live, polling, connecting) with a distinct glyph per state, plus the word from sm up.",
+      "Do strike DISCARD with the diagonal pattern wherever it appears."
+    ],
+    "donts": [
+      "Don't build the generic IoT dashboard of KPI cards and sparklines; state is read from VVM marks and words.",
+      "Don't signal status with colour alone, or with teal.",
+      "Don't pulse or animate the VVM mark on mount, on route change, or on a loop.",
+      "Don't nest panels inside panels.",
+      "Don't add a second typeface.",
+      "Don't use hard offset shadows or anything heavier than the label lift on resting surfaces.",
+      "Don't use the modal for anything but protected-focus confirmations; everything else stays inline."
+    ]
+  }
+}

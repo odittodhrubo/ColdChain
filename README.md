@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P12 alerts and device commands** (door, breach, power, offline, batch and flood alerts with dedupe and re-notification over in-app / Telegram / email; signed commands tracked until ack) on top of the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P13–P21).
+> Status: **P13 frontend foundation** (design system, login, role-aware shell, realtime layer) on top of alerts and device commands, the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P14–P21).
 
 ## Architecture
 
@@ -45,7 +45,7 @@ Wokwi's simulated Wi-Fi (`Wokwi-GUEST`) reaches the public internet but **not** 
 | `tools/` | Python package `coldchain_tools` (virtual node, simulation engine, attack / tamper / verify tools, see [docs/tools.md](docs/tools.md)), constant/vector generators, test runner |
 | `contracts/` | `constants.json` and `test_vectors.json`: the single source of truth |
 | `infra/` | Docker Compose and Mosquitto config |
-| `docs/` | [Shared contracts](docs/CONTRACTS.md), [hardware](docs/hardware.md), [firmware](docs/firmware.md), [tools](docs/tools.md), [backend](docs/backend.md) and, later, API, security and AI docs |
+| `docs/` | [Shared contracts](docs/CONTRACTS.md), [hardware](docs/hardware.md), [firmware](docs/firmware.md), [tools](docs/tools.md), [backend](docs/backend.md), [frontend](docs/frontend.md) and, later, API, security and AI docs |
 
 ## Prerequisites
 

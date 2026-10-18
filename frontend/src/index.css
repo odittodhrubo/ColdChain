@@ -1,10 +1,190 @@
 @import 'tailwindcss';
 
-/* Placeholder tokens; the full design system (status palette, light/dark toggle) arrives in P13. */
-@theme {
-  --color-primary: oklch(0.55 0.1 190);
+/*
+ * ColdChain design tokens. World: vaccine-vial-monitor label stock. Cool white label panels on a pale slate
+ * ground, 1px slate rules, teal ink for actions and selection, one status ink per state that always travels
+ * with a glyph and a word. Light and dark are the same system; dark is for the night-shift wall monitor.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --ground: #eef2f6; /* the room the labels sit in */
+  --panel: #ffffff; /* label stock */
+  --panel-2: #f6f8fa; /* table heads, rails */
+  --rule: #d5dde6;
+  --rule-strong: #b6c2cf;
+  --ink: #0f1b2a;
+  --ink-2: #44546a; /* secondary text, 7.4:1 on panel */
+  --ink-3: #5b6b80; /* tertiary, 5.4:1 on panel */
+  --teal: #0f766e;
+  --teal-strong: #0b5e57;
+  --teal-wash: #e3f4f1;
+  --on-teal: #ffffff;
+  --focus: #0f766e;
+
+  /* status inks: text-on-wash pairs >= 4.5:1 */
+  --safe: #15803d;
+  --safe-wash: #e8f6ec;
+  --warning: #a35400;
+  --warning-wash: #fdf3e2;
+  --breach: #c0262d;
+  --breach-wash: #fdeceb;
+  --on-breach: #ffffff;
+  --atrisk: #c2410c;
+  --atrisk-wash: #fff0e6;
+  --discard: #3d0d10;
+  --discard-wash: #f3e3e3;
+  --offline: #5b6b80;
+  --offline-wash: #edf1f5;
+  --demo: #6d28d9;
+  --on-demo: #ffffff;
 }
 
-::selection {
-  background: color-mix(in oklch, var(--color-primary) 30%, transparent);
+.dark {
+  color-scheme: dark;
+  --ground: #0a121c;
+  --panel: #111c29;
+  --panel-2: #0e1823;
+  --rule: #24344a;
+  --rule-strong: #34486a;
+  --ink: #e7eef6;
+  --ink-2: #aab8c8;
+  --ink-3: #8d9db0;
+  --teal: #2dc6b5;
+  --teal-strong: #5fd8ca;
+  --teal-wash: #0f2e2e;
+  --on-teal: #04211e;
+  --focus: #5fd8ca;
+
+  --safe: #4ade80;
+  --safe-wash: #0f2a1a;
+  --warning: #fbbf4a;
+  --warning-wash: #2e2310;
+  --breach: #ff7a7a;
+  --breach-wash: #351416;
+  --on-breach: #2a0709; /* dark ink on the light red fill: 7.9:1 */
+  --atrisk: #fb9a5a;
+  --atrisk-wash: #33190c;
+  --discard: #ffb4b4;
+  --discard-wash: #2a0c0e;
+  --offline: #9aa8b8;
+  --offline-wash: #1a2533;
+  --demo: #7c3aed; /* white text 5.7:1 */
+  --on-demo: #ffffff;
+}
+
+@theme inline {
+  --font-sans: 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --color-ground: var(--ground);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-teal: var(--teal);
+  --color-teal-strong: var(--teal-strong);
+  --color-teal-wash: var(--teal-wash);
+  --color-on-teal: var(--on-teal);
+  --color-safe: var(--safe);
+  --color-safe-wash: var(--safe-wash);
+  --color-warning: var(--warning);
+  --color-warning-wash: var(--warning-wash);
+  --color-breach: var(--breach);
+  --color-breach-wash: var(--breach-wash);
+  --color-on-breach: var(--on-breach);
+  --color-atrisk: var(--atrisk);
+  --color-atrisk-wash: var(--atrisk-wash);
+  --color-discard: var(--discard);
+  --color-discard-wash: var(--discard-wash);
+  --color-offline: var(--offline);
+  --color-offline-wash: var(--offline-wash);
+  --color-demo: var(--demo);
+  --color-on-demo: var(--on-demo);
+  --radius-label: 6px;
+}
+
+@layer base {
+  html {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--teal) 28%, transparent);
+    color: inherit;
+  }
+  input,
+  textarea {
+    caret-color: var(--teal);
+  }
+  a {
+    text-underline-offset: 3px;
+  }
+  * {
+    scrollbar-color: var(--rule-strong) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+@layer utilities {
+  /* readings, counts, lots: figures that line up */
+  .figures {
+    font-variant-numeric: tabular-nums;
+  }
+  /* DISCARD is permanent: the diagonal strike, like a crossed-out label */
+  .strike-pattern {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      color-mix(in oklab, var(--discard) 16%, transparent) 0 2px,
+      transparent 2px 7px
+    );
+  }
+}
+
+/* The VVM mark pulses once when its state changes (signature interaction). */
+@keyframes vvm-pulse {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.vvm-pulse {
+  animation: vvm-pulse 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes skeleton {
+  50% {
+    opacity: 0.55;
+  }
+}
+.skeleton {
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
 }

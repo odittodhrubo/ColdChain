@@ -43,3 +43,8 @@ Thumbs.db
 
 # virtual node state (persisted seq per simulated device)
 tools/.state/
+
+# impeccable design workflow: review captures and decision-page logs are local evidence, not source
+.impeccable/review/
+.impeccable/questions/
+.impeccable/mocks/
