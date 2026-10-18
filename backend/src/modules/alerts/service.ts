@@ -201,10 +201,10 @@ export class AlertEngine {
   private notify(row: AlertRow, nowMs: number) {
     this.sql.notified.run(nowMs, row.id);
     const round = row.notify_count + 1;
-    const data = JSON.parse(row.data) as { title: string; lines: string[]; link?: string };
+    const data = JSON.parse(row.data) as { title?: string; lines?: string[]; link?: string };
     const msg: AlertMessage = {
-      title: round > 1 ? `${data.title} (reminder ${round - 1})` : data.title,
-      lines: data.lines,
+      title: round > 1 ? `${data.title ?? row.type} (reminder ${round - 1})` : (data.title ?? row.type),
+      lines: data.lines ?? [],
       link: data.link,
       severity: (this.sql.byId.get(row.id) as AlertRow).severity,
     };
@@ -223,14 +223,14 @@ export class AlertEngine {
   /** Job (every few seconds): door escalation, re-notification, flood windows ending. */
   tick(nowMs = Date.now()) {
     for (const row of this.sql.doorWarnings.all(nowMs - DOOR_CRITICAL_AFTER_MS) as AlertRow[]) {
-      const data = JSON.parse(row.data) as { title: string; lines: string[] };
+      const data = JSON.parse(row.data) as { lines?: string[] };
       this.raise(
         {
           type: 'DOOR_OPEN_LONG',
           severity: 'CRITICAL',
           fridgeId: row.fridge_id,
           title: 'Door open for more than 5 minutes',
-          lines: data.lines,
+          lines: data.lines ?? this.fridgeLines(row.fridge_id ?? ''),
         },
         nowMs,
       );

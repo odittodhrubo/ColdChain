@@ -2,6 +2,7 @@ import { purgeRevoked } from '../auth/tokens';
 import { writeAnchor } from '../modules/audit/chain';
 import { refreshAllStatuses } from '../modules/batches/service';
 import type { AppContext } from '../shared/http';
+import { logger } from '../shared/logger';
 import { notifyOps } from '../shared/notify';
 
 export const ANCHOR_EVERY_MS = 60 * 60_000;
@@ -14,20 +15,34 @@ export async function anchorAudit(ctx: AppContext) {
   return a;
 }
 
+/** Runs a job and logs a failure instead of letting one bad row take the whole server down. */
+export function guarded(name: string, job: () => unknown): () => void {
+  return () => {
+    try {
+      const r = job();
+      if (r instanceof Promise)
+        r.catch((err: Error) => logger.error({ job: name, err: err.message }, 'job failed'));
+    } catch (err) {
+      logger.error({ job: name, err: (err as Error).message }, 'job failed');
+    }
+  };
+}
+
 /** Background jobs. Returns a stop function that also flushes pending audit entries. */
 export function startJobs(ctx: AppContext): () => void {
+  const every = (ms: number, name: string, job: () => unknown) => setInterval(guarded(name, job), ms);
   const timers = [
-    setInterval(() => purgeRevoked(ctx.db), 10 * 60_000),
-    setInterval(() => ctx.audit.flushRejects(), 10_000), // coalesced SECURITY_REJECT windows, one per minute
-    setInterval(() => void anchorAudit(ctx), ANCHOR_EVERY_MS),
-    setInterval(() => ctx.ingest.tick(), 1000), // seq-gap SYNC_REQUEST, offline watchdog
-    setInterval(() => ctx.heat.tick(), 10_000), // exposure over data holes that were never synced
-    setInterval(() => ctx.alerts.tick(), 5000), // door escalation, re-notification, flood windows
-    setInterval(() => ctx.commands.sweep(), 30_000), // untracked commands without cmdack -> TIMEOUT
-    setInterval(() => ctx.ingest.purgeNonces(), 60_000), // nonces only matter for NONCE_TTL_S
-    setInterval(() => refreshAllStatuses(ctx), 10 * 60_000), // expiry turns batches DISCARD at UTC midnight
+    every(10 * 60_000, 'purge-revoked', () => purgeRevoked(ctx.db)),
+    every(10_000, 'flush-rejects', () => ctx.audit.flushRejects()), // coalesced SECURITY_REJECT, one per minute
+    every(ANCHOR_EVERY_MS, 'anchor', () => anchorAudit(ctx)),
+    every(1000, 'ingest-tick', () => ctx.ingest.tick()), // seq-gap SYNC_REQUEST, offline watchdog
+    every(10_000, 'heat-tick', () => ctx.heat.tick()), // exposure over data holes that were never synced
+    every(5000, 'alerts-tick', () => ctx.alerts.tick()), // door escalation, re-notification, flood windows
+    every(30_000, 'commands-sweep', () => ctx.commands.sweep()), // commands without cmdack -> TIMEOUT
+    every(60_000, 'purge-nonces', () => ctx.ingest.purgeNonces()), // nonces only matter for NONCE_TTL_S
+    every(10 * 60_000, 'batch-statuses', () => refreshAllStatuses(ctx)), // expiry -> DISCARD at UTC midnight
   ];
-  refreshAllStatuses(ctx);
+  guarded('batch-statuses', () => refreshAllStatuses(ctx))();
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation
   return () => {
     timers.forEach(clearInterval);

@@ -3,6 +3,7 @@ import { type BatchInput, createBatch, refreshStatus } from '../src/modules/batc
 import { AlertEngine, RENOTIFY_MS } from '../src/modules/alerts/service';
 import { Notifier, telegramText } from '../src/modules/alerts/notifier';
 import { CommandTracker } from '../src/mqtt/commands';
+import { guarded } from '../src/jobs';
 import { OFFLINE_ALERT_AFTER_MS } from '../src/mqtt/ingest';
 import { envelope, NOW, nowS, reading, setup, telemetry, topic } from './deviceHelpers';
 import { addUser, batchInput, bearer, tokenFor } from './helpers';
@@ -355,5 +356,27 @@ describe('command publisher', () => {
       (await s.t.http().get(`/api/commands/${res.body.command.cmd_id}`).set(insp)).body.command.status,
     ).toBe('PENDING');
     s.ctx.commands.stop();
+  });
+});
+
+describe('robustness', () => {
+  it('an alert row without stored lines does not break escalation or re-notification', async () => {
+    const s = withTelegram();
+    const t0 = Date.now();
+    s.t.db
+      .prepare(
+        "INSERT INTO alerts (key, type, severity, fridge_id, message, data, created_at, updated_at, notified_at) VALUES ('DOOR_OPEN_LONG|fridge-01|-', 'DOOR_OPEN_LONG', 'WARNING', 'fridge-01', 'x', '{}', ?, ?, ?)",
+      )
+      .run(t0, t0, t0);
+    expect(() => s.ctx.alerts.tick(t0 + 6 * 60_000)).not.toThrow();
+    expect(s.alerts()[0].severity).toBe('CRITICAL');
+  });
+
+  it('a failing background job is logged, never thrown into the timer', async () => {
+    expect(() =>
+      guarded('boom', () => {
+        throw new Error('bad row');
+      })(),
+    ).not.toThrow();
   });
 });
