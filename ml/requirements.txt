@@ -1,7 +1,9 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-scikit-learn>=1.5
-pandas>=2.2
-numpy>=2.0
-joblib>=1.4
-matplotlib>=3.9
+# Pinned to the versions the committed models were trained with (ml/models/model_card.json): a pickled
+# scikit-learn model must be loaded by the same scikit-learn.
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+scikit-learn==1.9.1
+pandas==3.0.6
+numpy==2.5.4
+joblib==1.6.0
+matplotlib==3.11.2

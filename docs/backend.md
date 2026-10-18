@@ -68,7 +68,7 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 |---|---|---|
 | `GET /api/batches?fridge_id&status&expiring_within_days&q&page&pageSize` | `dashboard:read` | `q` searches name, lot and manufacturer (LIKE wildcards escaped) |
 | `POST /api/batches` | `batch:write` | needs `fridge_id`; `409 FRIDGE_FULL` at capacity; expiry must be in the future |
-| `GET /api/batches/:id` | `dashboard:read` | batch, assignment history, exposure summary (with `demoScale`) |
+| `GET /api/batches/:id` | `dashboard:read` | batch, assignment history, exposure summary (with `demoScale`), `public_url` for the QR check page |
 | `PATCH /api/batches/:id` | `batch:write` | any of `name`, `quantity`, `criticality`, `expiry_date` |
 | `DELETE /api/batches/:id` | `batch:delete` (Admin) | soft delete, only at quantity 0 (`409 QUANTITY_NOT_ZERO`); frees the fridge slot |
 | `POST /api/batches/:id/move` `{to_fridge_id}` | `batch:write` | atomic; `409 BATCH_DISCARDED`, `FRIDGE_FULL`, `SAME_FRIDGE` |
@@ -122,6 +122,51 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 - `GET /api/fridges/:id` → the fridge, its last 50 events and last 25 readings (each with `late` when it arrived through sync).
 - `GET /api/fridges/:id/readings?from&to&bucket` (unix s; default the last hour): history averaged into buckets on the server, the bucket raised as needed so any range is at most 600 points (24 h at 5 s = 17 280 readings → 144 s buckets). Each point has `temp` (avg), `min`, `max` and flags for door opened, compressor running, on battery and late data; events in the range come with it for the chart markers.
 
+## AI loop: predictions, alerts, relocation (P18)
+
+**Scheduler** (`src/ml/engine.ts`): every 30 s (`ml-tick` job), for each fridge with a reading in the last 3 min:
+- **Input:** the last 60 minutes as 1-minute buckets (door / compressor as the fraction of the minute, gaps up to 3 min forward-filled), plus the last 24 h of buckets and recent health scores.
+- **Call:** `POST {ML_URL}/predict` with a 1 s timeout. Runs never overlap, and ingestion never waits on them.
+- **Output:** the answer is stored in `ml_predictions` (`forecast` JSON plus `level`, `source`, `model_version`) and pushed as `prediction:update`.
+- **ML service down:** a deterministic rule answers instead, stored with `source: "fallback"` and `stale: true`. The rule is linear extrapolation of the last 30 min, capped while the compressor is visibly cycling, plus a cycle-rate health score against the node's nominal cooling pull. The UI must label it.
+- **Alerts** (through the P12 engine):
+  - `PREDICTED_BREACH` after 2 consecutive runs at MEDIUM or above; CRITICAL when HIGH. Resolved after 2 calm runs.
+  - `COMPRESSOR_WEAK` after 2 weakening runs; CRITICAL below 50. Resolved after 3 healthy runs.
+
+**Planner** (`src/modules/relocation/planner.ts`, pure, unit-tested):
+- **A fridge is at risk** when its forecast is HIGH, MEDIUM with the door open or on battery, its health is below 40, or it is on battery below 30 % with the temperature rising.
+- **Candidate batches:** every non-discarded batch in it, ordered by lowest remaining budget, then higher criticality, then earliest expiry. Discarded batches are listed as "dispose, cannot be saved".
+- **A target must be:** online, `SAFE`, door shut, on mains, forecast `LOW`, health ≥ 60, p90 ≤ 7.5 °C, with free room.
+- **Target ranking:** margin under 8 °C first, then health, then room.
+- **Room runs out:** the highest-priority batches move first; the rest are reported as `shortfall`.
+- **No target at all:** the plan is `NO_SAFE_TARGET`, with each refused fridge and its reason, advice to use a portable cooler, and a CRITICAL alert.
+
+**Plans** (`src/modules/relocation/service.ts`, table `relocation_plans`):
+- **Lifecycle:** proposed after 2 consecutive at-risk runs; withdrawn (`CANCELLED`) after 3 safe runs. One active plan per fridge.
+- **Changes:** a plan is refreshed with a new `version` only when its moves would change. It expires after 15 min.
+- **Audit:** `RELOCATION_PROPOSED`, `RELOCATION_CONFIRMED`, `RELOCATION_DISMISSED`. `RELOCATION_PROPOSED` is also an alert.
+- **Nothing moves without a person.**
+
+| Endpoint | Permission | Notes |
+|---|---|---|
+| `GET /api/relocations?status=active\|all&limit` | `dashboard:read` | newest first |
+| `GET /api/relocations/:id` | `dashboard:read` | |
+| `POST /api/relocations/:id/confirm` `{version}` | `relocation:confirm` (Admin, Pharmacist) | rate limited |
+| `POST /api/relocations/:id/dismiss` `{reason}` | `relocation:confirm` | records the reason; no new plan for that fridge for 15 min |
+| `GET /api/ml/predictions/:fridgeId?from&to&limit` | `dashboard:read` | history (unix ms, default the last 6 h) + `latest` |
+| `GET /api/ml/report` | `dashboard:read` | proxied from the ML service: `metrics`, `report_md`, `model_card`, figure URLs; `503 ML_UNAVAILABLE` when it is down |
+| `GET /api/ml/report/figures/:name` | `dashboard:read` | the PNG, proxied (whitelisted names) |
+
+**What confirm does:**
+1. It re-checks everything at confirm time: the batches are still in the source fridge and not discarded, each target is still eligible, and there is room.
+2. It moves all batches in **one transaction**, reusing the P10 move. Each `BATCH_MOVED` carries `plan_id` and the AI rationale, under the confirming user. One `RELOCATION_CONFIRMED` entry is added.
+3. Once committed, it emits `batch:update` and `relocation:update`.
+
+**How confirm refuses or repeats:**
+- A wrong `version`, an expired plan or changed conditions answer `409` with the refreshed plan in `error.details.plan`, and changed conditions also list `problems`. Nothing moves.
+- A `NO_SAFE_TARGET` plan answers `409 NO_SAFE_TARGET`.
+- A second confirm of a confirmed plan returns it with `already: true` (double-click safe).
+
 ## Database
 
 `openDb(DB_PATH)` sets `journal_mode=WAL`, `foreign_keys=ON` and `busy_timeout=5000`, then applies every `src/db/migrations/NNN_*.sql` not yet in `schema_migrations`, each in a transaction. Re-running is a no-op. `003_inventory.sql` adds the P10 batch columns, `004_exposure.sql` stores exposure as integer milliseconds, `005_alerts.sql` adds alert episodes and `pending_commands`. `001_init.sql` creates the contract §6 tables (`users`, `devices`, `fridges`, `readings`, `events`, `batches`, `batch_assignments`, `alerts`, `nonces`, `security_events`, `audit_log`, `relocation_plans`, `ml_predictions`) plus `revoked_tokens` and `login_attempts`. Keys: `readings UNIQUE(device_id, seq)`, `events UNIQUE(device_id, seq)`, `nonces UNIQUE(device_id, nonce)` + `expires_at` index, `batches UNIQUE(public_token)`; indexes on `readings(fridge_id, ts)`, `events(fridge_id, ts)` and `batch_assignments(batch_id, to_ts)`.
@@ -163,7 +208,7 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 ### Read API
 
-`GET /api/audit?type&actor&from&to&page&pageSize` (permission `audit:read`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
+`GET /api/audit?type&actor&batch_id&from&to&page&pageSize` (permission `audit:read`; `batch_id` matches `payload.batch_id`; `from`/`to` in unix ms, page size ≤ 200): newest first, with `hash`, `prev_hash` and the parsed `payload`, plus `total`.
 
 ## Device ingestion (MQTT)
 
@@ -198,11 +243,11 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 **Run one ingesting backend per broker prefix.** Two instances on the same database would both process every message, and the second correctly rejects each one as `REPLAY`.
 
-**Endpoints:** `GET /api/security/events?reason&device_id&page&pageSize` (`audit:read`), `GET /api/metrics/ingest` (`metrics:read`: Admin and Inspector) with accepted counts by kind, rejected counts by reason, late readings, sync requests, and per device last seen / online / LWT hint / max seq / acked up to / open gap.
+**Endpoints:** `GET /api/security/events?reason&device_id&page&pageSize` (`audit:read`), `GET /api/security/summary` (`audit:read`: last-hour accepted and rejected counts, rejects by reason, per device active / last accepted / open sequence gap), `GET /api/metrics/ingest` (`metrics:read`: Admin and Inspector) with accepted counts by kind, rejected counts by reason, late readings, sync requests, and per device last seen / online / LWT hint / max seq / acked up to / open gap.
 
 ## Realtime
 
-Socket.IO on the same HTTP server. Clients connect with `io(url, {auth: {token: <JWT>}})`; the token is verified, checked against revocations, and the user must be active. Events: `fridge:update` (live state, including `online`), `security:event`, `device:status`, `device:cmdack`; later prompts add `batch:update`, `alert:new`, `prediction:update` and `relocation:update`.
+Socket.IO on the same HTTP server. Clients connect with `io(url, {auth: {token: <JWT>}})`; the token is verified, checked against revocations, and the user must be active. Events: `fridge:update` (live state, including `online`), `security:event`, `device:status`, `device:cmdack`; `batch:update`, `alert:new`, `alert:update`, `prediction:update` (each stored prediction) and `relocation:update` (each plan change).
 
 ## Seed
 

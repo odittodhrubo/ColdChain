@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`relocation plan > no safe target: strong warning, the refused fridges and the advice (snapshot) 1`] = `"No safe fridge for the batches in Vaccine Fridge AVaccine Fridge A may become unsafe because forecast 8.9 °C in 30 min (up to 9.8 °C).Move the batches to a portable cooler or a nearby site now, keep the door shut and check the fridge.Vaccine Fridge B: forecast up to 7.9 °CVaccine Fridge A: forecast 8.9 °C in 30 min. Moving 2 batches: 2 to Vaccine Fridge B.Dismiss"`;

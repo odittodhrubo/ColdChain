@@ -19,7 +19,7 @@ All commands below run from `tools/` with that venv's Python (`python -m coldcha
 
 ## Simulation engine
 
-`sim_engine` mirrors the firmware module by module: `ThermalModel`, `CompressorControl` (hysteresis, 60 s min-off, fault duty), `classify`, `HeatKeeper` (exposure and latch), `PowerModel`, `DoorAlarm`, `RingBuffer`, `Syncer`, plus `FridgeNode`, which is `main.cpp`'s loop without the uplink. It reads the contract constants from `contracts/constants.json` and **parses** the firmware's own tuning (`node_config.h`: thermal model, battery, sync timing), so the simulator cannot silently diverge from the device. Message bodies are byte-for-byte the firmware's: same field order, `temp` with two decimals.
+`sim_engine` mirrors the firmware module by module: `ThermalModel` (its `params` override the firmware's ambient, leak, door, cooling and noise for the ML dataset's fridge profiles), `CompressorControl` (hysteresis, 60 s min-off, fault duty), `classify`, `HeatKeeper` (exposure and latch), `PowerModel`, `DoorAlarm`, `RingBuffer`, `Syncer`, plus `FridgeNode`, which is `main.cpp`'s loop without the uplink. It reads the contract constants from `contracts/constants.json` and **parses** the firmware's own tuning (`node_config.h`: thermal model, battery, sync timing), so the simulator cannot silently diverge from the device. Message bodies are byte-for-byte the firmware's: same field order, `temp` with two decimals.
 
 Offline fast mode (virtual clock, no MQTT) yields every message plus the model's ground truth (true temperature, compressor efficiency):
 

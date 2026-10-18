@@ -23,7 +23,7 @@ export function Table<T>({
   onRowClick?: (row: T) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="figures w-full border-collapse text-left text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 bg-panel-2">

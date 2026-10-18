@@ -70,16 +70,34 @@ describe('socket events merge into the query cache', () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: ['batches'] });
   });
 
-  it('alert, prediction and relocation events refresh their queries', () => {
+  it('alert, prediction, relocation and security events refresh their queries', () => {
     const qc = client();
     const spy = vi.spyOn(qc, 'invalidateQueries');
     applyRealtimeEvent(qc, 'alert:new', { id: 1 });
     applyRealtimeEvent(qc, 'prediction:update', { fridge_id: 'fridge-01' });
     applyRealtimeEvent(qc, 'relocation:update', { id: 3 });
+    applyRealtimeEvent(qc, 'security:event', { reason: 'BAD_SIG' });
     expect(spy.mock.calls.map((c) => c[0])).toEqual([
       { queryKey: ['alerts'] },
-      { queryKey: ['predictions'] },
+      { queryKey: ['predictions', 'fridge-01', 'latest'] }, // nothing cached yet: fetch it
       { queryKey: ['relocations'] },
+      { queryKey: ['security'] },
     ]);
+  });
+
+  it('prediction:update replaces the cached latest forecast without a refetch', () => {
+    const qc = client();
+    qc.setQueryData(['predictions', 'fridge-01', 'latest'], {
+      predictions: [],
+      latest: null,
+      server_time: 1,
+    });
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    applyRealtimeEvent(qc, 'prediction:update', { fridge_id: 'fridge-01', pred_temp_30: 6.1 });
+    expect(spy).not.toHaveBeenCalled();
+    expect(
+      qc.getQueryData<{ latest: { pred_temp_30: number } }>(['predictions', 'fridge-01', 'latest'])?.latest
+        .pred_temp_30,
+    ).toBe(6.1);
   });
 });

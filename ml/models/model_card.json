@@ -1,0 +1,107 @@
+{
+  "trained_at": "2026-10-18T08:07:08Z",
+  "seed": 7,
+  "versions": {
+    "python": "3.14.6",
+    "scikit-learn": "1.9.1",
+    "numpy": "2.5.4",
+    "pandas": "3.0.6"
+  },
+  "dataset": {
+    "seed": 2026,
+    "generated_at": "2026-10-18",
+    "raw_rows": 862060,
+    "forecast_rows": 172290,
+    "health_rows": 14304
+  },
+  "forecast": {
+    "model": "HistGradientBoostingRegressor: median (absolute error) + quantile p10/p90 conformalised on validation, horizon 30 min",
+    "interval_margin": 0.12035007363156353,
+    "features": [
+      "temp_now",
+      "minutes_since_reading",
+      "temp_mean_5",
+      "temp_std_5",
+      "temp_min_5",
+      "temp_max_5",
+      "temp_mean_15",
+      "temp_std_15",
+      "temp_min_15",
+      "temp_max_15",
+      "temp_mean_30",
+      "temp_std_30",
+      "temp_min_30",
+      "temp_max_30",
+      "temp_mean_60",
+      "temp_std_60",
+      "temp_min_60",
+      "temp_max_60",
+      "temp_slope_5",
+      "temp_slope_15",
+      "temp_slope_30",
+      "temp_accel",
+      "door_frac_5",
+      "door_frac_15",
+      "door_frac_60",
+      "door_since_open",
+      "door_open_run",
+      "comp_on_now",
+      "comp_duty_15",
+      "comp_duty_60",
+      "comp_since_on",
+      "comp_since_off",
+      "comp_run",
+      "comp_switches_60",
+      "on_battery_now",
+      "battery_minutes_60",
+      "batt_now",
+      "time_to_8",
+      "min_off_wait",
+      "missing_frac_60",
+      "hour_sin",
+      "hour_cos"
+    ],
+    "params": {
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 127
+    },
+    "warning_method": "classifier",
+    "thresholds": {
+      "medium": 0.13114754098360654,
+      "high": 0.7692307692307693
+    },
+    "rule": "HIGH if pred > 8 or p90 > 9; MEDIUM if p90 > 8; LOW otherwise"
+  },
+  "health": {
+    "model": "HistGradientBoostingRegressor on 24 h cycle features + IsolationForest on healthy cycles",
+    "features": [
+      "cool_rate_on",
+      "warm_rate_off",
+      "on_duration_mean",
+      "off_duration_mean",
+      "pulldown_7_3",
+      "overshoot_7",
+      "cycles_per_hour",
+      "n_cycles",
+      "duty_24",
+      "duty_trend",
+      "longest_on_run",
+      "temp_mean_24",
+      "temp_max_24",
+      "frac_above_8",
+      "coverage_hours"
+    ],
+    "params": {
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 63
+    },
+    "formula": "health = clip(model - 20 x anomaly, 0, 100); anomaly in [0, 1]",
+    "fallback": "fewer than 3 cycles: 100 x (cooling rate ON + warming rate OFF) / healthy median",
+    "bands": {
+      "GOOD": "80-100",
+      "WEAKENING": "50-79",
+      "FAILING": "0-49"
+    },
+    "weakening": "health < 70 or 24 h trend < -5 points/day"
+  }
+}

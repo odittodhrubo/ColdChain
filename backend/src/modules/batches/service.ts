@@ -227,22 +227,42 @@ export function moveBatch(
   userId?: number,
   nowMs = Date.now(),
 ) {
+  ctx.db.transaction(() => moveInTransaction(ctx, id, toFridgeId, userId, nowMs))();
+  return emit(ctx, getBatch(ctx.db, id, nowMs));
+}
+
+/**
+ * The move itself, for a caller that already holds a transaction (a confirmed relocation plan moves several
+ * batches atomically). `extra` goes into the BATCH_MOVED audit payload (plan id, AI rationale). The caller
+ * emits the socket updates after its commit.
+ */
+export function moveInTransaction(
+  ctx: AppContext,
+  id: number,
+  toFridgeId: string,
+  userId?: number,
+  nowMs = Date.now(),
+  extra: Record<string, unknown> = {},
+) {
   const { db } = ctx;
-  db.transaction(() => {
-    const b = view(row(db, id), nowMs);
-    if (b.status === 'DISCARD') throw conflict('BATCH_DISCARDED', 'A discarded batch cannot be moved');
-    if (b.fridge_id === toFridgeId) throw conflict('SAME_FRIDGE', `Batch is already in ${toFridgeId}`);
-    checkRoom(db, toFridgeId);
-    db.prepare('UPDATE batch_assignments SET to_ts = ? WHERE batch_id = ? AND to_ts IS NULL').run(nowMs, id);
-    db.prepare('INSERT INTO batch_assignments (batch_id, fridge_id, from_ts) VALUES (?, ?, ?)').run(
-      id,
-      toFridgeId,
-      nowMs,
-    );
-    db.prepare('UPDATE batches SET updated_at = ? WHERE id = ?').run(nowMs, id);
-    ctx.audit.append(actorOf(userId), 'BATCH_MOVED', { batch_id: id, from: b.fridge_id, to: toFridgeId });
-  })();
-  return emit(ctx, getBatch(db, id, nowMs));
+  const b = view(row(db, id), nowMs);
+  if (b.status === 'DISCARD') throw conflict('BATCH_DISCARDED', 'A discarded batch cannot be moved');
+  if (b.fridge_id === toFridgeId) throw conflict('SAME_FRIDGE', `Batch is already in ${toFridgeId}`);
+  checkRoom(db, toFridgeId);
+  db.prepare('UPDATE batch_assignments SET to_ts = ? WHERE batch_id = ? AND to_ts IS NULL').run(nowMs, id);
+  db.prepare('INSERT INTO batch_assignments (batch_id, fridge_id, from_ts) VALUES (?, ?, ?)').run(
+    id,
+    toFridgeId,
+    nowMs,
+  );
+  db.prepare('UPDATE batches SET updated_at = ? WHERE id = ?').run(nowMs, id);
+  ctx.audit.append(actorOf(userId), 'BATCH_MOVED', {
+    batch_id: id,
+    from: b.fridge_id,
+    to: toFridgeId,
+    ...extra,
+  });
+  return b.fridge_id;
 }
 
 /** Soft delete, Admin only, once the batch is used up (quantity 0). It leaves its fridge; history stays. */
@@ -295,7 +315,7 @@ export function refreshAllStatuses(ctx: AppContext, nowMs = Date.now()): number 
   }).length;
 }
 
-function emit(ctx: AppContext, b: BatchView): BatchView {
+export function emit(ctx: AppContext, b: BatchView): BatchView {
   ctx.realtime.emit('batch:update', b);
   return b;
 }

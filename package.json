@@ -16,6 +16,8 @@
     "up": "docker compose -f infra/docker-compose.yml up -d --build --renew-anon-volumes",
     "down": "docker compose -f infra/docker-compose.yml down",
     "seed": "npm --prefix backend run seed",
-    "demo": "npm --prefix backend run demo"
+    "demo": "npm --prefix backend run demo",
+    "ml:data": "cd ml && python -m data.generate",
+    "ml:train": "cd ml && python -m train"
   }
 }

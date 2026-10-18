@@ -41,7 +41,7 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 ## Data and realtime
 
 - `api<T>()` normalises every failure to `ApiError {status, code, message, details}` (`status 0` = server unreachable). Queries pass TanStack's `AbortSignal`, so leaving a page cancels its requests. 4xx responses are never retried; network errors and 5xx retry twice.
-- `RealtimeProvider` opens **one** Socket.IO connection per session, authenticated with the JWT (`io({auth: {token}})`), and opens it again whenever the token changes. Pages never subscribe themselves: `realtime/merge.ts` applies `fridge:update`, `fridge:latch`, `batch:update`, `alert:new`, `alert:update`, `prediction:update` and `relocation:update` to the query cache.
+- `RealtimeProvider` opens **one** Socket.IO connection per session, authenticated with the JWT (`io({auth: {token}})`), and opens it again whenever the token changes. Pages never subscribe themselves: `realtime/merge.ts` applies `fridge:update`, `fridge:latch`, `batch:update`, `alert:new`, `alert:update`, `prediction:update`, `relocation:update` and `security:event` to the query cache.
 - When the socket is down the provider refetches the live queries every 5 s, and the top bar shows **Polling every 5 s** (glyph + word) instead of **Live**.
 
 ## Shell
@@ -59,11 +59,54 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 - Status shown is always the server's (`live.state` from the shared `classify()`), never recomputed differently; timers use server timestamps (`lib/time.ts`). Pure rules live in `dashboard/logic.ts` and are unit-tested, including against the shared status vectors.
 - Thresholds come from `src/lib/constants.ts`, generated from `contracts/constants.json` like the other targets.
 
+## Inventory, QR, public check, security, audit, users (P15)
+
+- **Routing**: `/check/:token` is public (outside `RequireAuth`, no chrome). Every signed-in page is lazy-loaded, so a QR scan downloads only the public card.
+- **Inventory** (`pages/InventoryPage.tsx`): search (name, lot, manufacturer), fridge / status filters, "Expiring ≤ 30 days", sortable columns (`aria-sort`). Row actions follow the role: Edit and Move need `batch:write` and are hidden for discarded batches; QR and Details are for everyone. Discarded rows are struck through with "Disposal required" and, for Admin, a link to acknowledge it on the fridge page.
+  - **Add / edit** (`inventory/BatchForm.tsx`): validated before sending (future expiry, quantity, fridge); `FRIDGE_FULL` is explained in place.
+  - **Move** (`inventory/MoveDialog.tsx`): fridges with load / capacity and status; full fridges and the current one are disabled.
+  - **QR** (`inventory/QrDialog.tsx`): the SVG is fetched with the bearer token and shown as a data URL; **Copy public link** uses `public_url` from the batch detail; **Print label** prints only the label (name, lot, expiry, QR with quiet zone; `@media print` in `index.css`).
+  - **Details** (`inventory/DetailsDrawer.tsx`): assignment history, the cumulative exposure chart, and the batch's audit entries (`/api/audit?batch_id=`).
+- **Public check** (`pages/PublicCheckPage.tsx`): one card with SAFE / AT RISK / DISCARD as icon + word + plain guidance, name, lot, expiry (flagged when expired) and last checked. "Batch not found" for an unknown token, a wait message on 429. Sends no token, adds `noindex, nofollow`.
+- **Security** (`pages/SecurityPage.tsx`): last-hour accepted / rejected counts by reason and per-device last seen and open sequence gap (`/api/security/summary`), then the rejected messages filterable by reason and device. Five or more rejects with the same device and reason within a minute are marked as a **burst**.
+- **Audit Log** (`pages/AuditPage.tsx`): the chain newest first, filterable by event and actor, with short `prev_hash` / `hash` that copy in full. **Verify Integrity** (every role) streams `GET /api/audit/verify?stream=1` with a progress bar, then a green "Chain intact — n records" or a red panel with the first broken record and why; that row is highlighted and the list jumps to its page.
+- **Alerts** (`pages/AlertsPage.tsx`): history filtered by status, severity, type and fridge, the alert's detail lines, per-channel delivery result (in-app / Telegram / email: sent, failed, skipped) and Ack for roles with `alert:ack`.
+- **Users** (Admin, `pages/UsersPage.tsx`): add users (password rule checked as on the server), change role inline, reset a password, disable / enable. Refusals such as `LAST_ADMIN` are explained and the row snaps back.
+
+## AI forecast, health, relocation and report (P19)
+
+- **Forecast** (`ai/Forecast.tsx`, `ai/AiPanel.tsx`):
+  - The fridge detail shows a risk badge (glyph + word: Low / Medium / High risk) and one sentence: "Forecast 8.9 °C in 30 min – may exceed 8 °C in ~18 min". It also shows the 80 % range and the breach probability.
+  - The history chart gets a dashed forecast line from the last reading to +30 min, a shaded p10–p90 band and a marker at the predicted value.
+  - Each fridge card carries a "Next 30 min" chip.
+  - The prediction's age is always shown. A rule-based fallback is labelled "AI service down". Anything older than two scheduler runs is marked `stale` and is never drawn on the chart as current.
+- **Compressor health** (`ai/HealthGauge.tsx`):
+  - A 0–100 semicircle with Good / Weakening / Failing bands, the score and its band in words, and the 7-day trend.
+  - When weakening, a "Weakening compressor – service recommended" banner appears.
+  - "Why this score" lists the factors in plain language: cooling rate while running, share of time running, cycles per hour, trend.
+- **Relocation** (`ai/RelocationPanel.tsx`, `ai/Relocations.tsx`):
+  - Each active plan appears above the dashboard and on `/relocations`. It shows the reason, a table of batch → destination with urgency (Move first / Soon / When possible) and budget left, batches with no room, batches to dispose of, the destination's safety and an expiry countdown.
+  - **Confirm relocation** is one click for Admin / Pharmacist, disabled while in flight. It sends the plan `version`. On success a toast links to the audit entry, and inventory, fridges and alerts refresh.
+  - A `409` swaps in the refreshed plan and lists what changed; nothing is claimed as moved.
+  - **No safe target** has its own red state with the refused fridges and the manual-action advice.
+  - An Inspector sees plans read-only. Dismiss asks for a reason.
+- **AI Report** (`/ai-report`):
+  - A "Trained on synthetic data" badge with the model version.
+  - KPI cards: forecast MAE against the baselines, breach recall and precision, lead time, health error.
+  - The dataset summary, the permutation importances, and `REPORT.md` rendered with `react-markdown` + `remark-gfm` (no raw HTML).
+  - The figures are fetched with the session token.
+- **Realtime:** `prediction:update` patches the cached latest forecast in place, with no refetch. `relocation:update` refreshes the plans.
+- **Playwright AI flow** (`e2e/ai.spec.ts`):
+  - The run starts the real ML service (`e2e/ml-server.mjs`, port 8310) and runs the scheduler every 5 s (`ML_INTERVAL_MS`).
+  - `e2e/feed_readings.py` writes 3 h of weak-compressor history plus live readings into the e2e database. It stands in for the nodes, so no broker is needed.
+  - The test checks that health drops, a plan appears, the Pharmacist confirms, and inventory shows the batches in Fridge B.
+
 ## Development
 
 ```bash
 npm --prefix frontend run dev     # Vite on :5173, proxies /api and /socket.io to the backend on :4000
 npm --prefix frontend test        # vitest + Testing Library
 npm --prefix frontend run lint    # eslint + tsc
-npm --prefix frontend run e2e     # Playwright smoke test: starts a seeded backend (:4310) and Vite (:5310)
+npm --prefix frontend run e2e     # Playwright: starts a seeded backend (:4310) and Vite (:5310); the integrity test runs
+                                  # coldchain_tools.tamper against the e2e DB (needs the tools venv)
 ```

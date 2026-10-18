@@ -41,6 +41,7 @@ export function startJobs(ctx: AppContext): () => void {
     every(30_000, 'commands-sweep', () => ctx.commands.sweep()), // commands without cmdack -> TIMEOUT
     every(60_000, 'purge-nonces', () => ctx.ingest.purgeNonces()), // nonces only matter for NONCE_TTL_S
     every(10 * 60_000, 'batch-statuses', () => refreshAllStatuses(ctx)), // expiry -> DISCARD at UTC midnight
+    every(ctx.config.ML_INTERVAL_MS, 'ml-tick', () => ctx.ml.tick()), // forecasts, health, alerts, relocation plans
   ];
   guarded('batch-statuses', () => refreshAllStatuses(ctx))();
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation

@@ -21,12 +21,18 @@ import { silentRealtime } from './realtime';
 import { errorHandler, notFoundHandler } from './shared/errors';
 import { type AppContext, defineRoute, mountRoutes, type RouteDef } from './shared/http';
 import { requestLog } from './shared/logger';
+import { MlEngine } from './ml/engine';
+import { mlRoutes } from './ml/routes';
+import { RelocationEngine } from './modules/relocation/service';
+import { relocationRoutes } from './modules/relocation/routes';
 
 export function createApp(config: Config, db: Db) {
   const ctx = { config, db, audit: new AuditLog(db), realtime: silentRealtime, hooks: {} } as AppContext;
   ctx.ingest = new Ingestor(ctx); // fed by the MQTT client in index.ts, or directly in tests
   ctx.heat = new HeatEngine(ctx);
   ctx.alerts = new AlertEngine(ctx);
+  ctx.ml = new MlEngine(ctx); // calls the ML service on its own timer: ingestion never waits for it
+  ctx.relocation = new RelocationEngine(ctx);
   // realtime is swapped for Socket.IO after start-up: always emit through the current one
   ctx.commands = new CommandTracker(db, ctx.ingest.sender, { emit: (e, d) => ctx.realtime.emit(e, d) });
   // Device pipeline fan-out: exposure first (it may change batch statuses), then alerts and command tracking.
@@ -77,6 +83,8 @@ export function createApp(config: Config, db: Db) {
     ...exposureRoutes(),
     ...alertRoutes(),
     ...fridgeRoutes(),
+    ...relocationRoutes(),
+    ...mlRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));

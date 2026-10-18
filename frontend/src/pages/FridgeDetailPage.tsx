@@ -1,7 +1,6 @@
 import {
   BatteryWarning,
   BellRing,
-  BrainCircuit,
   CloudUpload,
   DoorClosed,
   DoorOpen,
@@ -18,23 +17,28 @@ import {
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  Area,
   CartesianGrid,
   ComposedChart,
   Line,
   ReferenceArea,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
+import { AiPanel } from '../ai/AiPanel';
+import { RISK, STALE_AFTER_MS } from '../ai/Forecast';
+import { usePrediction } from '../ai/queries';
 import { BudgetPanel } from '../dashboard/BudgetPanel';
 import { FridgeCard } from '../dashboard/FridgeCard';
 import { PageHeader } from '../layout/AppShell';
 import { DOUBLE_ABOVE_C, SAFE_MAX_C, SAFE_MIN_C } from '../lib/constants';
 import { useFridge, useReadings, type HistoryPoint } from '../lib/queries';
-import { useServerNow } from '../lib/time';
-import type { DeviceEvent, ReadingRow } from '../lib/types';
+import { serverNow, useServerNow } from '../lib/time';
+import type { DeviceEvent, Prediction, ReadingRow } from '../lib/types';
 import { Panel } from '../ui/Panel';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 import { Table } from '../ui/Table';
@@ -102,9 +106,39 @@ function LateDot(props: { cx?: number; cy?: number; payload?: HistoryPoint; inde
   );
 }
 
-function ChartTooltip({ active, payload }: { active?: boolean; payload?: { payload: HistoryPoint }[] }) {
+type ChartPoint = HistoryPoint & { fc?: number | null; band?: [number, number] | null; forecast?: boolean };
+
+/** The forecast as two extra points: from the last reading to +30 min (median line + p10-p90 band). */
+export function forecastPoints(points: HistoryPoint[], p: Prediction | null | undefined, nowMs: number) {
+  const last = [...points].reverse().find((x) => x.temp !== null);
+  if (!p || !last || p.pred_temp_30 === null || p.p10 === null || p.p90 === null) return [];
+  if (nowMs - p.created_at > STALE_AFTER_MS) return []; // never draw an old forecast as if it were current
+  const t = last.temp as number;
+  const blank = { temp: null, min: null, max: null, door: 0, comp: 0, battery: 0, late: 0 };
+  return [
+    { ...blank, ts: last.ts, fc: t, band: [t, t] as [number, number], forecast: true },
+    {
+      ...blank,
+      ts: last.ts + 1800,
+      fc: p.pred_temp_30,
+      band: [p.p10, p.p90] as [number, number],
+      forecast: true,
+    },
+  ];
+}
+
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: { payload: ChartPoint }[] }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
+  if (p.forecast && p.band)
+    return (
+      <div className="figures rounded-md border border-rule bg-panel px-3 py-2 text-xs shadow-[0_8px_24px_rgb(15_27_42/0.14)]">
+        <p className="font-semibold text-ink">Forecast {time(p.ts, true)}</p>
+        <p className="text-ink-2">
+          {p.fc?.toFixed(1)} °C (80 % range {p.band[0].toFixed(1)}–{p.band[1].toFixed(1)})
+        </p>
+      </div>
+    );
   return (
     <div className="figures rounded-md border border-rule bg-panel px-3 py-2 text-xs shadow-[0_8px_24px_rgb(15_27_42/0.14)]">
       <p className="font-semibold text-ink">{time(p.ts, true)}</p>
@@ -130,17 +164,26 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
     'bucket' in range ? range.bucket : undefined,
   );
   const points = useMemo(() => data?.points ?? [], [data]);
+  const prediction = usePrediction(fridgeId).data?.latest;
+  const fc = useMemo(() => forecastPoints(points, prediction, serverNow()), [points, prediction]);
+  const chartData: ChartPoint[] = useMemo(() => [...points, ...fc], [points, fc]);
+  const risk = prediction ? RISK[prediction.breach_level] : null;
   const strips = useMemo(() => compressorStrips(points, data?.bucket ?? 5), [points, data?.bucket]);
   const markers = (data?.events ?? []).filter((e) =>
     ['DOOR_OPEN', 'DOOR_ALARM', 'POWER_FAIL'].includes(e.type),
   );
   // explicit numeric domains: the band and the 12 °C line always show, real readings are never clipped
-  const temps = points.flatMap((p) => [p.min, p.max, p.temp]).filter((t): t is number => t !== null);
+  const temps = [...points.flatMap((p) => [p.min, p.max, p.temp]), ...fc.flatMap((p) => p.band ?? [])].filter(
+    (t): t is number => t !== null,
+  );
   const yDomain = [
     Math.floor(Math.min(SAFE_MIN_C - 1, ...temps)),
     Math.ceil(Math.max(DOUBLE_ABOVE_C + 1, ...temps)),
   ];
-  const xDomain = [points[0]?.ts ?? 0, (points.at(-1)?.ts ?? 0) + (data?.bucket ?? 0)];
+  const xDomain = [
+    points[0]?.ts ?? 0,
+    Math.max((points.at(-1)?.ts ?? 0) + (data?.bucket ?? 0), fc.at(-1)?.ts ?? 0),
+  ];
 
   return (
     <Panel
@@ -177,10 +220,12 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
           <div
             className="h-72"
             role="img"
-            aria-label={`Temperature over the last ${range.label}, ${points.length} points`}
+            aria-label={`Temperature over the last ${range.label}, ${points.length} points${
+              fc.length ? `, forecast ${prediction!.pred_temp_30!.toFixed(1)} °C in 30 minutes` : ''
+            }`}
           >
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={points} margin={{ top: 10, right: 12, bottom: 0, left: -12 }}>
+              <ComposedChart data={chartData} margin={{ top: 10, right: 12, bottom: 0, left: -12 }}>
                 <CartesianGrid stroke="var(--rule)" strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="ts"
@@ -244,6 +289,35 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
                   />
                 ))}
                 <Tooltip content={<ChartTooltip />} />
+                {fc.length > 0 && (
+                  <>
+                    <Area
+                      dataKey="band"
+                      stroke="none"
+                      fill={risk!.ink}
+                      fillOpacity={0.14}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                    <Line
+                      dataKey="fc"
+                      stroke={risk!.ink}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                    <ReferenceDot
+                      x={fc[1].ts}
+                      y={fc[1].fc!}
+                      r={5}
+                      fill={risk!.ink}
+                      stroke="var(--panel)"
+                      strokeWidth={2}
+                    />
+                  </>
+                )}
                 <Line
                   type="monotone"
                   dataKey="temp"
@@ -284,6 +358,12 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
               <span className="size-2 rotate-45 bg-warning" />
               Arrived late through sync
             </li>
+            {fc.length > 0 && (
+              <li className="flex items-center gap-1.5">
+                <span className="h-0 w-4 border-t-2 border-dashed" style={{ borderColor: risk!.ink }} />
+                Forecast +30 min, shaded 80 % range
+              </li>
+            )}
             <li className="text-ink-3">{data!.bucket} s per point</li>
           </ul>
         </>
@@ -367,12 +447,7 @@ export function FridgeDetailPage() {
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.6fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <FridgeCard fridge={fridge} now={now} />
-          <Panel title="AI forecast and compressor health">
-            <EmptyState icon={<BrainCircuit aria-hidden className="size-6" />} title="Not connected yet">
-              The 30-minute forecast and the 0–100 compressor health score appear here once the AI service is
-              running.
-            </EmptyState>
-          </Panel>
+          <AiPanel fridgeId={fridge.id} now={now} />
         </div>
         <div className="flex min-w-0 flex-col gap-5">
           <HistoryChart fridgeId={fridge.id} />

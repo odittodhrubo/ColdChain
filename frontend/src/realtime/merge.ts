@@ -9,7 +9,8 @@ import type { QueryClient } from '@tanstack/react-query';
 //   ['batches', filters?]       { batches: Batch[], ... }
 //   ['batch', id]               { batch: Batch, ... }
 //   ['alerts', ...]             alert lists and the top-bar summary
-//   ['predictions', fridgeId], ['relocations'], ['health']
+//   ['predictions', fridgeId, 'latest' | 'health-7d'], ['relocations', status], ['health']
+//   ['security', ...]           rejected-message summary and list
 
 export const REALTIME_EVENTS = [
   'fridge:update',
@@ -19,6 +20,7 @@ export const REALTIME_EVENTS = [
   'alert:update',
   'prediction:update',
   'relocation:update',
+  'security:event',
 ] as const;
 export type RealtimeEvent = (typeof REALTIME_EVENTS)[number];
 
@@ -32,6 +34,7 @@ export const POLLED_KEYS = [
   'predictions',
   'relocations',
   'health',
+  'security',
 ];
 
 interface WithId {
@@ -105,11 +108,22 @@ export function applyRealtimeEvent(qc: QueryClient, event: string, data: unknown
     case 'alert:update':
       void qc.invalidateQueries({ queryKey: ['alerts'] }); // lists are filtered server side
       break;
-    case 'prediction:update':
-      void qc.invalidateQueries({ queryKey: ['predictions'] });
+    case 'prediction:update': {
+      // the latest forecast is the payload itself; the 7-day health history refreshes on its own schedule
+      const p = data as { fridge_id: string };
+      const key = ['predictions', p.fridge_id, 'latest'];
+      if (qc.getQueryData(key))
+        qc.setQueryData<{ predictions: unknown[]; latest: unknown }>(key, (old) =>
+          old ? { ...old, latest: p, predictions: [...old.predictions, p].slice(-200) } : old,
+        );
+      else void qc.invalidateQueries({ queryKey: key });
       break;
+    }
     case 'relocation:update':
       void qc.invalidateQueries({ queryKey: ['relocations'] });
+      break;
+    case 'security:event':
+      void qc.invalidateQueries({ queryKey: ['security'] });
       break;
   }
 }

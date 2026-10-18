@@ -42,6 +42,50 @@ export function securityRoutes(): RouteDef[] {
       },
     }),
 
+    // The security page's tiles (every role that may read security events): last hour accepted vs rejected,
+    // rejects by reason, and each device's last accepted message and open seq gap.
+    defineRoute({
+      method: 'get',
+      path: '/api/security/summary',
+      access: { permission: 'audit:read' },
+      handler(_in, { db, ingest }) {
+        const now = Date.now();
+        const since = Math.floor((now - 3600_000) / 1000);
+        const count = (sql: string, ...a: number[]) =>
+          db
+            .prepare(sql)
+            .pluck()
+            .get(...a) as number;
+        const accepted =
+          count('SELECT COUNT(*) FROM readings WHERE received_at >= ?', now - 3600_000) +
+          count('SELECT COUNT(*) FROM events WHERE received_at >= ?', now - 3600_000);
+        const byReason = db
+          .prepare(
+            'SELECT reason, COUNT(*) AS n FROM security_events WHERE ts >= ? GROUP BY reason ORDER BY n DESC',
+          )
+          .all(since) as { reason: string; n: number }[];
+        const gaps = new Map(ingest.snapshot(now).devices.map((d) => [d.device_id, d.open_gap]));
+        const devices = (
+          db
+            .prepare('SELECT device_id, fridge_id, active, last_seen_at FROM devices ORDER BY device_id')
+            .all() as {
+            device_id: string;
+            fridge_id: string;
+            active: number;
+            last_seen_at: number | null;
+          }[]
+        ).map((d) => ({ ...d, active: d.active === 1, open_gap: gaps.get(d.device_id) ?? null }));
+        return {
+          window_s: 3600,
+          accepted,
+          rejected: byReason.reduce((a, r) => a + r.n, 0),
+          by_reason: byReason,
+          devices,
+          server_time: now,
+        };
+      },
+    }),
+
     // Ingestion counters (Admin / Inspector): accepted by kind, rejected by reason, per-device state and gaps.
     defineRoute({
       method: 'get',

@@ -54,31 +54,39 @@ def remaining_pct(weighted_s: float) -> float:
 # ---------------------------------------------------------------- physics and control
 
 
-class ThermalModel:
-    """dT/dt = k_leak(Tamb-T) + door*k_door(Tamb-T) - comp*cool_rate*efficiency; Euler sub-steps <= 1 s."""
+THERMAL_PARAMS = ("T_AMBIENT_C", "K_LEAK_PER_S", "K_DOOR_PER_S", "COOL_RATE_C_PER_S", "NOISE_SIGMA_C")
 
-    def __init__(self, seed: int = 0x12345678, speed: float | None = None):
+
+class ThermalModel:
+    """dT/dt = k_leak(Tamb-T) + door*k_door(Tamb-T) - comp*cool_rate*efficiency; Euler sub-steps <= 1 s.
+
+    The firmware's parameters by default; `params` overrides some of THERMAL_PARAMS (dataset fridge profiles,
+    P16) and may be changed between steps (a drifting ambient)."""
+
+    def __init__(self, seed: int = 0x12345678, speed: float | None = None, params: dict | None = None):
         self.temp = F["T_INITIAL_C"]
         self.efficiency = 1.0
         self.speed = F["THERMAL_SPEED"] if speed is None else speed
+        self.params = {k: F[k] for k in THERMAL_PARAMS} | (params or {})
         self._rng = random.Random(seed)
 
     def step(self, real_dt_s: float, door_open: bool, comp_on: bool) -> None:
+        p = self.params
         remaining = real_dt_s * self.speed
         while remaining > 0:
             dt = min(remaining, F["MAX_STEP_S"])
-            gap = F["T_AMBIENT_C"] - self.temp
-            dtdt = F["K_LEAK_PER_S"] * gap
+            gap = p["T_AMBIENT_C"] - self.temp
+            dtdt = p["K_LEAK_PER_S"] * gap
             if door_open:
-                dtdt += F["K_DOOR_PER_S"] * gap
+                dtdt += p["K_DOOR_PER_S"] * gap
             if comp_on:
-                dtdt -= F["COOL_RATE_C_PER_S"] * self.efficiency
+                dtdt -= p["COOL_RATE_C_PER_S"] * self.efficiency
             self.temp += dtdt * dt
             remaining -= dt
 
     def read(self) -> float:
-        """Measurement noise only (sigma 0.03 C); the state itself never random-walks."""
-        return self.temp + self._rng.gauss(0.0, F["NOISE_SIGMA_C"])
+        """Measurement noise only (sigma 0.03 C by default); the state itself never random-walks."""
+        return self.temp + self._rng.gauss(0.0, self.params["NOISE_SIGMA_C"])
 
 
 class CompressorControl:

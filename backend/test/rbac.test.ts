@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { can, PERMISSIONS, ROLES, type Role } from '../src/rbac/permissions';
 import type { RouteDef } from '../src/shared/http';
 import { type BatchInput, createBatch } from '../src/modules/batches/service';
 import type { AppContext } from '../src/shared/http';
 import { encryptSecret } from '../src/shared/secretbox';
 import { addFridge, addUser, batchInput, bearer, makeApp, PASSWORD, tokenFor, type TestApp } from './helpers';
+import { proposedPlan } from './relocationHelpers';
 
 const ctxOf = (t: TestApp) => t.app.locals.ctx as AppContext;
 /** A fridge with an active device (secret encrypted like the seed does). */
@@ -55,6 +56,20 @@ const EXAMPLES: Record<string, Example> = {
   'GET /api/audit/verify': async () => ({}),
   'GET /api/security/events': async () => ({ path: '/api/security/events?reason=BAD_SIG' }),
   'GET /api/metrics/ingest': async () => ({}),
+  'GET /api/security/summary': async () => ({}),
+  'GET /api/relocations': async () => ({}),
+  'GET /api/relocations/:id': async (t) => ({ path: `/api/relocations/${proposedPlan(t).plan.id}` }),
+  'POST /api/relocations/:id/confirm': async (t) => {
+    const { plan } = proposedPlan(t);
+    return { path: `/api/relocations/${plan.id}/confirm`, body: { version: plan.version } };
+  },
+  'POST /api/relocations/:id/dismiss': async (t) => ({
+    path: `/api/relocations/${proposedPlan(t).plan.id}/dismiss`,
+    body: { reason: 'Handled by phone' },
+  }),
+  'GET /api/ml/predictions/:fridgeId': async (t) => ({ path: `/api/ml/predictions/${addFridge(t)}` }),
+  'GET /api/ml/report': async () => ({}),
+  'GET /api/ml/report/figures/:name': async () => ({ path: '/api/ml/report/figures/actual_vs_pred.png' }),
   'GET /api/batches': async () => ({}),
   'POST /api/batches': async (t) => ({ body: batchInput(addFridge(t)) }),
   'GET /api/batches/:id': async (t) => ({ path: `/api/batches/${newBatch(t).id}` }),
@@ -96,6 +111,22 @@ function expected(route: RouteDef, role: Role | null): 'ok' | 401 | 403 {
 
 describe('RBAC: every registered route x every role', async () => {
   const t = makeApp();
+  // the ML service is another process: answer its report endpoints here (supertest itself does not use fetch)
+  beforeAll(() => {
+    const real = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: URL | string, init?: RequestInit) => {
+      const u = String(url);
+      if (!u.startsWith(t.config.ML_URL)) return real(url, init);
+      if (u.includes('/report/figures/')) return new Response(new Uint8Array([137, 80, 78, 71]));
+      return Response.json({
+        metrics: {},
+        report_md: '# r',
+        figures: ['actual_vs_pred.png'],
+        model_card: null,
+      });
+    });
+  });
+  afterAll(() => vi.unstubAllGlobals());
   const routes = t.app.locals.routes as RouteDef[];
 
   it('every route has an example request and a known access rule', () => {

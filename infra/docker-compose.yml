@@ -38,7 +38,7 @@ services:
   ml:
     build: ../ml
     ports:
-      - '8000:8000'
+      - '127.0.0.1:8000:8000' # backend only (no CORS); localhost for debugging
     volumes:
       - ../ml:/app
     healthcheck:
