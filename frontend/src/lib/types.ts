@@ -100,3 +100,61 @@ export interface ReadingRow {
   late: 0 | 1;
   received_at: number;
 }
+
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+/** One stored forecast + health score (GET /api/ml/predictions, socket prediction:update). */
+export interface Prediction {
+  fridge_id: string;
+  created_at: number; // unix ms, when the backend asked
+  source: 'model' | 'fallback';
+  stale: boolean; // the ML service did not answer: a rule-based fallback
+  at: number; // unix s, minute the forecast starts from
+  pred_temp_30: number | null;
+  p10: number | null;
+  p90: number | null;
+  breach_level: RiskLevel;
+  breach_prob: number | null;
+  minutes_to_breach_estimate: number | null;
+  health_score: number | null;
+  health_band: 'GOOD' | 'WEAKENING' | 'FAILING' | 'UNKNOWN';
+  health_method: string;
+  health_trend_per_day: number | null;
+  weakening: boolean;
+  features_used: Record<string, number | null>;
+  health_factors: Record<string, number | null>;
+  model_version: string | null;
+}
+
+export interface PlanMove {
+  batch_id: number;
+  batch_name: string;
+  lot_number: string;
+  remaining_pct: number;
+  to_fridge: string;
+  to_fridge_name: string;
+  urgency: RiskLevel;
+  reason: string;
+}
+
+export interface RelocationPlan {
+  id: string;
+  status: 'PROPOSED' | 'NO_SAFE_TARGET' | 'CONFIRMED' | 'DISMISSED' | 'EXPIRED' | 'CANCELLED';
+  version: number;
+  from_fridge: string;
+  from_fridge_name: string;
+  risk: string;
+  rationale: string;
+  advice: string | null;
+  moves: PlanMove[];
+  unsaveable: { batch_id: number; batch_name: string; lot_number: string; reason: string }[];
+  shortfall: { batch_id: number; batch_name: string; lot_number: string; reason: string }[];
+  targets: { id: string; name: string; p90: number | null; health: number | null; free: number }[];
+  rejected_targets: { id: string; name: string; why: string }[];
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+  decided_at: number | null;
+  decided_by: number | null;
+  decision_note: string | null;
+}

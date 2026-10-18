@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { CircleCheck, CircleX, Copy, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { session } from '../auth/session';
 import { PageHeader } from '../layout/AppShell';
 import { api, ApiError } from '../lib/api';
@@ -88,7 +89,10 @@ const REASON_TEXT: Record<string, string> = {
 
 export function AuditPage() {
   const toast = useToast();
-  const [type, setType] = useState('');
+  const [params] = useSearchParams(); // deep links, e.g. ?type=RELOCATION_CONFIRMED from a toast
+  const [type, setType] = useState(() =>
+    TYPES.includes(params.get('type') ?? '') ? params.get('type')! : '',
+  );
   const [actor, setActor] = useState('');
   const [page, setPage] = useState(1);
   const [verify, setVerify] = useState<

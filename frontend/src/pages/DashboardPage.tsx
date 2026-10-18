@@ -1,4 +1,5 @@
 import { Refrigerator } from 'lucide-react';
+import { ActivePlans } from '../ai/Relocations';
 import { AlertsFeed } from '../dashboard/AlertsFeed';
 import { BudgetPanel } from '../dashboard/BudgetPanel';
 import { FridgeCard } from '../dashboard/FridgeCard';
@@ -39,6 +40,7 @@ export function DashboardPage() {
         </Panel>
       ) : (
         <>
+          <ActivePlans />
           <SummaryStrip fridges={fridges} now={now} />
           <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(18rem,0.75fr)]">
             {fridges.map((f) => (

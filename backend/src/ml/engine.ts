@@ -10,8 +10,8 @@ import type { MinuteRow, Prediction, StoredPrediction } from './types';
 // planner. If the service is down the rule-based fallback answers instead, marked stale. Ingestion never waits
 // for any of this: it runs on its own timer.
 
-export const ML_INTERVAL_MS = 30_000;
-export const FRESH_FOR_MS = 2 * ML_INTERVAL_MS + 10_000; // older than two runs: the planner ignores it
+/** A prediction older than two runs (plus slack) is stale: the planner ignores it. */
+export const freshForMs = (intervalMs: number) => 2 * intervalMs + 10_000;
 const FILL_MAX_MIN = 3;
 const MIN_READINGS = 20;
 const SILENT_AFTER_S = 180; // no reading for 3 min: nothing new to predict on

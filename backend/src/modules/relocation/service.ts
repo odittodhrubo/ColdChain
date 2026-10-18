@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { FRESH_FOR_MS } from '../../ml/engine';
+import { freshForMs } from '../../ml/engine';
 import { HttpError, notFound } from '../../shared/errors';
 import type { AppContext } from '../../shared/http';
 import { emit as emitBatch, getBatch, listBatches, moveInTransaction } from '../batches/service';
@@ -75,7 +75,7 @@ export class RelocationEngine {
   snapshots(nowMs = Date.now()): { fridges: FridgeSnapshot[]; batches: BatchSnapshot[] } {
     const fridges = listFridges(this.ctx, nowMs).map((f): FridgeSnapshot => {
       const p = this.ctx.ml.latest(f.id);
-      const fresh = p && nowMs - p.created_at <= FRESH_FOR_MS ? p : null;
+      const fresh = p && nowMs - p.created_at <= freshForMs(this.ctx.config.ML_INTERVAL_MS) ? p : null;
       const live = f.live;
       return {
         id: f.id,

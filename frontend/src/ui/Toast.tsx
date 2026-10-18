@@ -1,5 +1,6 @@
 import { CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 
 type Tone = 'info' | 'success' | 'error';
 interface ToastItem {
@@ -7,6 +8,7 @@ interface ToastItem {
   tone: Tone;
   title: string;
   body?: string;
+  link?: { to: string; label: string }; // e.g. the audit entry an action created
 }
 
 const ToastContext = createContext<(t: Omit<ToastItem, 'id'>) => void>(() => undefined);
@@ -51,6 +53,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">{t.title}</p>
               {t.body && <p className="mt-0.5 text-sm text-ink-2">{t.body}</p>}
+              {t.link && (
+                <Link
+                  to={t.link.to}
+                  className="mt-1 inline-block text-sm font-semibold text-teal-strong underline"
+                >
+                  {t.link.label}
+                </Link>
+              )}
             </div>
             <button
               type="button"

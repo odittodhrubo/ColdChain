@@ -40,6 +40,7 @@ const schema = z
     SMTP_PASS: z.string().optional(),
     ALERT_EMAIL_TO: z.email().optional(),
     ML_URL: url(['http:', 'https:']).default('http://localhost:8000'),
+    ML_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(30_000), // scheduler period (tests: faster)
   })
   // A nonce must be remembered for the whole accepted timestamp range (now ± window), or a replay slips through.
   .refine((c) => c.NONCE_TTL_S >= 2 * c.HMAC_WINDOW_S, {

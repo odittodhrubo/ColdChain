@@ -79,10 +79,15 @@ const free = (f: FridgeSnapshot) => Math.max(0, f.capacity - f.load);
  * on battery below 30 % with the temperature rising. */
 export function riskOf(f: FridgeSnapshot): string | null {
   const p = f.prediction;
-  if (p?.level === 'HIGH')
-    return `forecast ${fmt(p.pred)} °C in 30 min (up to ${fmt(p.p90)} °C)${
-      p.minutes_to_breach !== null ? `, may pass 8 °C in about ${Math.round(p.minutes_to_breach)} min` : ''
-    }`;
+  if (p?.level === 'HIGH') {
+    const when =
+      p.minutes_to_breach === null
+        ? ''
+        : p.minutes_to_breach <= 0 || (f.temp ?? 0) > 8
+          ? ', already above 8 °C'
+          : `, may pass 8 °C in about ${Math.round(p.minutes_to_breach)} min`;
+    return `forecast ${fmt(p.pred)} °C in 30 min (up to ${fmt(p.p90)} °C)${when}`;
+  }
   if (p?.level === 'MEDIUM' && (f.door_open || f.on_battery))
     return `forecast up to ${fmt(p.p90)} °C in 30 min with the ${f.door_open ? 'door open' : 'power out'}`;
   if (p?.health !== null && p?.health !== undefined && p.health < RISK_HEALTH_BELOW)

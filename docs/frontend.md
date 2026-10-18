@@ -73,6 +73,34 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 - **Alerts** (`pages/AlertsPage.tsx`): history filtered by status, severity, type and fridge, the alert's detail lines, per-channel delivery result (in-app / Telegram / email: sent, failed, skipped) and Ack for roles with `alert:ack`.
 - **Users** (Admin, `pages/UsersPage.tsx`): add users (password rule checked as on the server), change role inline, reset a password, disable / enable. Refusals such as `LAST_ADMIN` are explained and the row snaps back.
 
+## AI forecast, health, relocation and report (P19)
+
+- **Forecast** (`ai/Forecast.tsx`, `ai/AiPanel.tsx`):
+  - The fridge detail shows a risk badge (glyph + word: Low / Medium / High risk) and one sentence: "Forecast 8.9 °C in 30 min – may exceed 8 °C in ~18 min". It also shows the 80 % range and the breach probability.
+  - The history chart gets a dashed forecast line from the last reading to +30 min, a shaded p10–p90 band and a marker at the predicted value.
+  - Each fridge card carries a "Next 30 min" chip.
+  - The prediction's age is always shown. A rule-based fallback is labelled "AI service down". Anything older than two scheduler runs is marked `stale` and is never drawn on the chart as current.
+- **Compressor health** (`ai/HealthGauge.tsx`):
+  - A 0–100 semicircle with Good / Weakening / Failing bands, the score and its band in words, and the 7-day trend.
+  - When weakening, a "Weakening compressor – service recommended" banner appears.
+  - "Why this score" lists the factors in plain language: cooling rate while running, share of time running, cycles per hour, trend.
+- **Relocation** (`ai/RelocationPanel.tsx`, `ai/Relocations.tsx`):
+  - Each active plan appears above the dashboard and on `/relocations`. It shows the reason, a table of batch → destination with urgency (Move first / Soon / When possible) and budget left, batches with no room, batches to dispose of, the destination's safety and an expiry countdown.
+  - **Confirm relocation** is one click for Admin / Pharmacist, disabled while in flight. It sends the plan `version`. On success a toast links to the audit entry, and inventory, fridges and alerts refresh.
+  - A `409` swaps in the refreshed plan and lists what changed; nothing is claimed as moved.
+  - **No safe target** has its own red state with the refused fridges and the manual-action advice.
+  - An Inspector sees plans read-only. Dismiss asks for a reason.
+- **AI Report** (`/ai-report`):
+  - A "Trained on synthetic data" badge with the model version.
+  - KPI cards: forecast MAE against the baselines, breach recall and precision, lead time, health error.
+  - The dataset summary, the permutation importances, and `REPORT.md` rendered with `react-markdown` + `remark-gfm` (no raw HTML).
+  - The figures are fetched with the session token.
+- **Realtime:** `prediction:update` patches the cached latest forecast in place, with no refetch. `relocation:update` refreshes the plans.
+- **Playwright AI flow** (`e2e/ai.spec.ts`):
+  - The run starts the real ML service (`e2e/ml-server.mjs`, port 8310) and runs the scheduler every 5 s (`ML_INTERVAL_MS`).
+  - `e2e/feed_readings.py` writes 3 h of weak-compressor history plus live readings into the e2e database. It stands in for the nodes, so no broker is needed.
+  - The test checks that health drops, a plan appears, the Pharmacist confirms, and inventory shows the batches in Fridge B.
+
 ## Development
 
 ```bash

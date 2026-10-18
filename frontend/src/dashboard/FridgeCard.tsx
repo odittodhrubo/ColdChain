@@ -21,6 +21,8 @@ import { StatusChip } from '../ui/StatusChip';
 import { compressorState, doorState, fridgeStatus, staleFor } from './logic';
 import { ResetLatchButton } from './ResetLatch';
 import { Sparkline } from './Sparkline';
+import { ForecastChip } from '../ai/Forecast';
+import { usePrediction } from '../ai/queries';
 import { TempGauge } from './TempGauge';
 
 function Row({
@@ -58,6 +60,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
   const meta = STATUS[status];
   const stale = staleFor(fridge, now);
   const door = doorState(fridge, now);
+  const prediction = usePrediction(fridge.id).data?.latest;
   const comp = compressorState(fridge, now);
   const icon = 'size-[18px]';
 
@@ -203,6 +206,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
 
       <div className="mt-auto border-t border-rule px-4 pt-2 pb-3">
         <Sparkline fridgeId={fridge.id} ink={meta.ink} />
+        <ForecastChip p={prediction} now={now} />
       </div>
     </article>
   );

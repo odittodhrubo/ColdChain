@@ -1,6 +1,5 @@
 import { purgeRevoked } from '../auth/tokens';
 import { writeAnchor } from '../modules/audit/chain';
-import { ML_INTERVAL_MS } from '../ml/engine';
 import { refreshAllStatuses } from '../modules/batches/service';
 import type { AppContext } from '../shared/http';
 import { logger } from '../shared/logger';
@@ -42,7 +41,7 @@ export function startJobs(ctx: AppContext): () => void {
     every(30_000, 'commands-sweep', () => ctx.commands.sweep()), // commands without cmdack -> TIMEOUT
     every(60_000, 'purge-nonces', () => ctx.ingest.purgeNonces()), // nonces only matter for NONCE_TTL_S
     every(10 * 60_000, 'batch-statuses', () => refreshAllStatuses(ctx)), // expiry -> DISCARD at UTC midnight
-    every(ML_INTERVAL_MS, 'ml-tick', () => ctx.ml.tick()), // forecasts, health, alerts, relocation plans
+    every(ctx.config.ML_INTERVAL_MS, 'ml-tick', () => ctx.ml.tick()), // forecasts, health, alerts, relocation plans
   ];
   guarded('batch-statuses', () => refreshAllStatuses(ctx))();
   void anchorAudit(ctx); // an anchor at every start, so a restart cannot hide a truncation

@@ -122,6 +122,8 @@ describe('relocation planner', () => {
   it('risk triggers and target rules', () => {
     expect(riskOf(fridge())).toBeNull();
     expect(riskOf(hot)).toMatch(/forecast 8\.9/);
+    expect(riskOf({ ...hot, temp: 9.4 })).toMatch(/already above 8 °C$/);
+    expect(riskOf(hot)).toMatch(/may pass 8 °C in about 18 min$/);
     const medium = {
       level: 'MEDIUM' as const,
       pred: 7,

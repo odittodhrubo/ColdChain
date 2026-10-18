@@ -7,7 +7,6 @@ import { AppShell } from './layout/AppShell';
 import { shouldRetry } from './lib/api';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NoPermissionPage';
-import { PlannedPage } from './pages/PlannedPage';
 import { PublicCheckPage } from './pages/PublicCheckPage';
 import { RealtimeProvider, type Connect } from './realtime/RealtimeProvider';
 import { ThemeProvider } from './theme/ThemeProvider';
@@ -33,6 +32,8 @@ const AlertsPage = lazyPage(() => import('./pages/AlertsPage'), 'AlertsPage');
 const SecurityPage = lazyPage(() => import('./pages/SecurityPage'), 'SecurityPage');
 const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const UsersPage = lazyPage(() => import('./pages/UsersPage'), 'UsersPage');
+const RelocationsPage = lazyPage(() => import('./ai/Relocations'), 'RelocationsPage');
+const AiReportPage = lazyPage(() => import('./ai/AiReportPage'), 'AiReportPage');
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -76,22 +77,8 @@ export function AppRoutes() {
         <Route path="fridges/:id" element={<FridgeDetailPage />} />
         <Route path="inventory" element={<InventoryPage />} />
         <Route path="alerts" element={<AlertsPage />} />
-        <Route
-          path="relocations"
-          element={
-            <PlannedPage title="Relocations" subtitle="AI suggestions to move batches">
-              Suggested batch moves when a fridge is predicted to breach, confirmed with one click.
-            </PlannedPage>
-          }
-        />
-        <Route
-          path="ai-report"
-          element={
-            <PlannedPage title="AI Report" subtitle="Forecast and compressor health models">
-              Dataset, features and model performance.
-            </PlannedPage>
-          }
-        />
+        <Route path="relocations" element={<RelocationsPage />} />
+        <Route path="ai-report" element={<AiReportPage />} />
         <Route
           path="security"
           element={
