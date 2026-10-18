@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P15 inventory, QR labels, public check page, security, audit and user screens** on top of the live dashboard and fridge detail, the frontend foundation (design system, login, role-aware shell, realtime layer), alerts and device commands, the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P16–P21).
+> Status: **P16 ML dataset generator and shared feature pipeline** on top of the inventory, QR, public check, security, audit and user screens, the live dashboard and fridge detail, the frontend foundation (design system, login, role-aware shell, realtime layer), alerts and device commands, the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P17–P21).
 
 ## Architecture
 
@@ -41,7 +41,7 @@ Wokwi's simulated Wi-Fi (`Wokwi-GUEST`) reaches the public internet but **not** 
 | `firmware/fridge-node/` | PlatformIO project (ESP32, Arduino). Envs `fridge-01`, `fridge-02`, `hw-smoke` (wiring test), `native` (unit tests). Wokwi projects in `wokwi/` |
 | `backend/` | Node 20 + TypeScript + Express API (`GET /api/health`) |
 | `frontend/` | React 18 + Vite + TypeScript + Tailwind |
-| `ml/` | FastAPI service (`GET /health`) |
+| `ml/` | FastAPI service (`GET /health`); synthetic dataset and the shared feature pipeline ([docs/ml.md](docs/ml.md)) |
 | `tools/` | Python package `coldchain_tools` (virtual node, simulation engine, attack / tamper / verify tools, see [docs/tools.md](docs/tools.md)), constant/vector generators, test runner |
 | `contracts/` | `constants.json` and `test_vectors.json`: the single source of truth |
 | `infra/` | Docker Compose and Mosquitto config |

@@ -3,7 +3,7 @@
 PY ?= python
 COMPOSE = docker compose -f infra/docker-compose.yml
 
-.PHONY: setup env gen check up down logs test test-strict lint format seed demo
+.PHONY: setup env gen check up down logs test test-strict lint format seed demo data
 
 setup:            ## install node deps and the python venv
 	npm run setup
@@ -49,3 +49,6 @@ seed:
 
 demo:
 	npm run demo
+
+data:             ## ML dataset: simulate 8 fridges x 60 days, build features, labels and DATASET_CARD.md
+	npm run ml:data

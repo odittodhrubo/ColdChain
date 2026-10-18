@@ -1,0 +1,234 @@
+{
+  "generated_at": "2026-10-18",
+  "seed": 2026,
+  "profiles": [
+    {
+      "profile": {
+        "name": "district-store",
+        "ambient_c": 26,
+        "leak": 0.0003,
+        "k_door": 0.0012,
+        "margin": 3.2,
+        "noise": 0.03,
+        "door_per_hour": 1.2,
+        "degrades": false,
+        "faults": 0,
+        "held_out": false,
+        "cool_rate": 0.02208
+      },
+      "rows": 86168,
+      "days": 60,
+      "door_events": 959,
+      "power_failures": 15,
+      "degradation_arcs": 0,
+      "faults": 0,
+      "missing_segments": 3,
+      "minutes_above_8": 560,
+      "seconds": 8.5
+    },
+    {
+      "profile": {
+        "name": "rural-clinic",
+        "ambient_c": 34,
+        "leak": 0.0004,
+        "k_door": 0.0015,
+        "margin": 2.6,
+        "noise": 0.08,
+        "door_per_hour": 1.5,
+        "degrades": true,
+        "faults": 1,
+        "held_out": false,
+        "cool_rate": 0.03224
+      },
+      "rows": 86255,
+      "days": 60,
+      "door_events": 1209,
+      "power_failures": 14,
+      "degradation_arcs": 4,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 2478,
+      "seconds": 8.6
+    },
+    {
+      "profile": {
+        "name": "pharmacy",
+        "ambient_c": 30,
+        "leak": 0.00035,
+        "k_door": 0.002,
+        "margin": 3.0,
+        "noise": 0.05,
+        "door_per_hour": 2.0,
+        "degrades": false,
+        "faults": 1,
+        "held_out": false,
+        "cool_rate": 0.02835
+      },
+      "rows": 86295,
+      "days": 60,
+      "door_events": 1566,
+      "power_failures": 14,
+      "degradation_arcs": 0,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 1722,
+      "seconds": 8.4
+    },
+    {
+      "profile": {
+        "name": "health-post",
+        "ambient_c": 36,
+        "leak": 0.00045,
+        "k_door": 0.0012,
+        "margin": 2.4,
+        "noise": 0.1,
+        "door_per_hour": 1.0,
+        "degrades": true,
+        "faults": 0,
+        "held_out": false,
+        "cool_rate": 0.03564
+      },
+      "rows": 86115,
+      "days": 60,
+      "door_events": 739,
+      "power_failures": 15,
+      "degradation_arcs": 4,
+      "faults": 0,
+      "missing_segments": 3,
+      "minutes_above_8": 2205,
+      "seconds": 8.6
+    },
+    {
+      "profile": {
+        "name": "hospital-ward",
+        "ambient_c": 24,
+        "leak": 0.00025,
+        "k_door": 0.0018,
+        "margin": 3.5,
+        "noise": 0.04,
+        "door_per_hour": 1.8,
+        "degrades": false,
+        "faults": 0,
+        "held_out": false,
+        "cool_rate": 0.018375
+      },
+      "rows": 86156,
+      "days": 60,
+      "door_events": 1399,
+      "power_failures": 15,
+      "degradation_arcs": 0,
+      "faults": 0,
+      "missing_segments": 3,
+      "minutes_above_8": 642,
+      "seconds": 8.4
+    },
+    {
+      "profile": {
+        "name": "outreach-hub",
+        "ambient_c": 32,
+        "leak": 0.00038,
+        "k_door": 0.0016,
+        "margin": 2.8,
+        "noise": 0.06,
+        "door_per_hour": 1.3,
+        "degrades": true,
+        "faults": 1,
+        "held_out": false,
+        "cool_rate": 0.030856
+      },
+      "rows": 86131,
+      "days": 60,
+      "door_events": 1014,
+      "power_failures": 16,
+      "degradation_arcs": 4,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 2423,
+      "seconds": 8.4
+    },
+    {
+      "profile": {
+        "name": "mobile-unit",
+        "ambient_c": 29,
+        "leak": 0.00042,
+        "k_door": 0.0014,
+        "margin": 2.7,
+        "noise": 0.07,
+        "door_per_hour": 1.4,
+        "degrades": true,
+        "faults": 1,
+        "held_out": true,
+        "cool_rate": 0.029484
+      },
+      "rows": 86203,
+      "days": 60,
+      "door_events": 1100,
+      "power_failures": 12,
+      "degradation_arcs": 3,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 1294,
+      "seconds": 8.5
+    },
+    {
+      "profile": {
+        "name": "city-depot",
+        "ambient_c": 27,
+        "leak": 0.00028,
+        "k_door": 0.001,
+        "margin": 3.3,
+        "noise": 0.05,
+        "door_per_hour": 1.1,
+        "degrades": false,
+        "faults": 1,
+        "held_out": true,
+        "cool_rate": 0.022176
+      },
+      "rows": 86230,
+      "days": 60,
+      "door_events": 835,
+      "power_failures": 13,
+      "degradation_arcs": 0,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 678,
+      "seconds": 8.2
+    }
+  ],
+  "raw_rows": 689553,
+  "minutes_above_8_pct": 1.74,
+  "forecast_rows": 137814,
+  "health_rows": 11443,
+  "features": 42,
+  "health_features": 15,
+  "by_split": {
+    "gap": {
+      "forecast_rows": 216,
+      "breach_rows": 0,
+      "breach_rate": 0.0,
+      "health_rows": 288
+    },
+    "test": {
+      "forecast_rows": 51625,
+      "breach_rows": 2195,
+      "breach_rate": 0.0426,
+      "health_rows": 4154
+    },
+    "train": {
+      "forecast_rows": 68820,
+      "breach_rows": 4130,
+      "breach_rate": 0.0601,
+      "health_rows": 5707
+    },
+    "val": {
+      "forecast_rows": 17153,
+      "breach_rows": 803,
+      "breach_rate": 0.0468,
+      "health_rows": 1294
+    }
+  },
+  "held_out_profiles": [
+    "city-depot",
+    "mobile-unit"
+  ]
+}
