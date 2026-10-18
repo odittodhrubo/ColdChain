@@ -7,7 +7,7 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 ## What it is
 
 8 simulated vaccine fridges × 60 days, sampled every 5 s and stored as 1-minute rows
-(689,553 rows). Temperature is above 8 °C in 1.74 % of minutes.
+(689,595 rows). Temperature is above 8 °C in 3.02 % of minutes.
 
 ## How it was made
 
@@ -21,6 +21,9 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 - **Events** (decided up front from the seed, then simulated):
   - door openings follow the working day (08–20 UTC; a tenth of the rate at night); 85 % last 5–60 s and
     15 % last 1–5 min (8,821 in total);
+  - the door left ajar for 20–90 min in working hours, about three a week: the switch reads open but
+    the compressor almost keeps up, so the temperature creeps up over many minutes (or holds)
+    (201 in total);
   - power failures of 5–90 min, about one every 4 days (114 in total);
   - gradual compressor degradation arcs, efficiency 1.0 → 0.30–0.45 over 8–13 days and then a repair
     (15 arcs, at least 3 per degrading profile over 60 days);
@@ -35,14 +38,14 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 
 | Profile | Ambient °C | Leak /s | Door /s | Cooling °C/s | Noise °C | Doors/h (day) | Degrades | Faults | Held out | Rows | Door events | Power failures | Arcs | Missing segments |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| district-store | 26 | 0.0003 | 0.0012 | 0.02208 | 0.03 | 1.2 | no | 0 | no | 86,168 | 959 | 15 | 0 | 3 |
-| rural-clinic | 34 | 0.0004 | 0.0015 | 0.03224 | 0.08 | 1.5 | yes | 1 | no | 86,255 | 1,209 | 14 | 4 | 3 |
-| pharmacy | 30 | 0.00035 | 0.002 | 0.02835 | 0.05 | 2.0 | no | 1 | no | 86,295 | 1,566 | 14 | 0 | 3 |
-| health-post | 36 | 0.00045 | 0.0012 | 0.03564 | 0.1 | 1.0 | yes | 0 | no | 86,115 | 739 | 15 | 4 | 3 |
-| hospital-ward | 24 | 0.00025 | 0.0018 | 0.018375 | 0.04 | 1.8 | no | 0 | no | 86,156 | 1,399 | 15 | 0 | 3 |
-| outreach-hub | 32 | 0.00038 | 0.0016 | 0.030856 | 0.06 | 1.3 | yes | 1 | no | 86,131 | 1,014 | 16 | 4 | 3 |
-| mobile-unit | 29 | 0.00042 | 0.0014 | 0.029484 | 0.07 | 1.4 | yes | 1 | yes | 86,203 | 1,100 | 12 | 3 | 3 |
-| city-depot | 27 | 0.00028 | 0.001 | 0.022176 | 0.05 | 1.1 | no | 1 | yes | 86,230 | 835 | 13 | 0 | 3 |
+| district-store | 26 | 0.0003 | 0.0012 | 0.02208 | 0.03 | 1.2 | no | 0 | no | 86,185 | 959 | 15 | 0 | 3 |
+| rural-clinic | 34 | 0.0004 | 0.0015 | 0.03224 | 0.08 | 1.5 | yes | 1 | no | 86,276 | 1,209 | 14 | 4 | 3 |
+| pharmacy | 30 | 0.00035 | 0.002 | 0.02835 | 0.05 | 2.0 | no | 1 | no | 86,212 | 1,566 | 14 | 0 | 3 |
+| health-post | 36 | 0.00045 | 0.0012 | 0.03564 | 0.1 | 1.0 | yes | 0 | no | 86,064 | 739 | 15 | 4 | 3 |
+| hospital-ward | 24 | 0.00025 | 0.0018 | 0.018375 | 0.04 | 1.8 | no | 0 | no | 86,211 | 1,399 | 15 | 0 | 3 |
+| outreach-hub | 32 | 0.00038 | 0.0016 | 0.030856 | 0.06 | 1.3 | yes | 1 | no | 86,071 | 1,014 | 16 | 4 | 3 |
+| mobile-unit | 29 | 0.00042 | 0.0014 | 0.029484 | 0.07 | 1.4 | yes | 1 | yes | 86,317 | 1,100 | 12 | 3 | 3 |
+| city-depot | 27 | 0.00028 | 0.001 | 0.022176 | 0.05 | 1.1 | no | 1 | yes | 86,259 | 835 | 13 | 0 | 3 |
 
 ## Labels
 
@@ -80,10 +83,10 @@ must not reach back into training labels (30 + 60 min for forecasts, 24 h for he
 
 | Split | Forecast rows | Breach rows | Breach rate (natural) | Health rows |
 |---|---|---|---|---|
-| train | 68,820 | 4,130 | 6.0 % | 5,707 |
-| val | 17,153 | 803 | 4.7 % | 1,294 |
-| test | 51,625 | 2,195 | 4.3 % | 4,154 |
-| gap | 216 | 0 | 0.0 % | 288 |
+| train | 68,823 | 5,314 | 7.7 % | 5,706 |
+| val | 17,114 | 1,102 | 6.5 % | 1,292 |
+| test | 51,669 | 3,200 | 6.2 % | 4,155 |
+| gap | 216 | 0 | 0.0 % | 287 |
 
 Breaches are rare. Evaluation keeps the natural ratio; any rebalancing happens in training only.
 

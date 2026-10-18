@@ -136,11 +136,12 @@ def build(raw_dir: Path = DATA / "raw", out_dir: Path = DATA / "processed", stat
     forecast.to_csv(out_dir / "forecast.csv.gz", index=False)
     health.to_csv(out_dir / "health.csv.gz", index=False)
     summary = summarize(raw, forecast, health, stats, seed)
-    (DATA / "dataset_stats.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    stats_text = json.dumps(summary, indent=2) + "\n"
+    (DATA / "dataset_stats.json").write_text(stats_text, encoding="utf-8", newline="\n")
     if card is not None:
         from data.card import render
 
-        card.write_text(render(summary), encoding="utf-8")
+        card.write_text(render(summary), encoding="utf-8", newline="\n")
     print(f"forecast {len(forecast)} rows, health {len(health)} rows -> {out_dir}")
     return summary
 

@@ -31,7 +31,7 @@ def _pct(rate: float | None) -> str:
 
 def render(summary: dict) -> str:
     profiles = summary["profiles"] or []
-    counted = ("door_events", "power_failures", "degradation_arcs", "faults")
+    counted = ("door_events", "ajar_events", "power_failures", "degradation_arcs", "faults")
     total = {k: sum(s[k] for s in profiles) for k in counted}
     days = profiles[0]["days"] if profiles else "?"
     order = ["train", "val", "test", "gap"]
@@ -63,6 +63,9 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 - **Events** (decided up front from the seed, then simulated):
   - door openings follow the working day (08–20 UTC; a tenth of the rate at night); 85 % last 5–60 s and
     15 % last 1–5 min ({total["door_events"]:,} in total);
+  - the door left ajar for 20–90 min in working hours, about three a week: the switch reads open but
+    the compressor almost keeps up, so the temperature creeps up over many minutes (or holds)
+    ({total["ajar_events"]} in total);
   - power failures of 5–90 min, about one every 4 days ({total["power_failures"]} in total);
   - gradual compressor degradation arcs, efficiency 1.0 → 0.30–0.45 over 8–13 days and then a repair
     ({total["degradation_arcs"]} arcs, at least 3 per degrading profile over 60 days);

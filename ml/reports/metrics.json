@@ -1,0 +1,655 @@
+{
+  "trained_at": "2026-10-18T07:22:39Z",
+  "dataset": {
+    "generated_at": "2026-10-18",
+    "seed": 2026,
+    "profiles": [
+      {
+        "profile": {
+          "name": "district-store",
+          "ambient_c": 26,
+          "leak": 0.0003,
+          "k_door": 0.0012,
+          "margin": 3.2,
+          "noise": 0.03,
+          "door_per_hour": 1.2,
+          "degrades": false,
+          "faults": 0,
+          "held_out": false,
+          "cool_rate": 0.02208
+        },
+        "rows": 86185,
+        "days": 60,
+        "door_events": 959,
+        "ajar_events": 22,
+        "power_failures": 15,
+        "degradation_arcs": 0,
+        "faults": 0,
+        "missing_segments": 3,
+        "minutes_above_8": 1283,
+        "seconds": 8.3
+      },
+      {
+        "profile": {
+          "name": "rural-clinic",
+          "ambient_c": 34,
+          "leak": 0.0004,
+          "k_door": 0.0015,
+          "margin": 2.6,
+          "noise": 0.08,
+          "door_per_hour": 1.5,
+          "degrades": true,
+          "faults": 1,
+          "held_out": false,
+          "cool_rate": 0.03224
+        },
+        "rows": 86276,
+        "days": 60,
+        "door_events": 1209,
+        "ajar_events": 19,
+        "power_failures": 14,
+        "degradation_arcs": 4,
+        "faults": 1,
+        "missing_segments": 3,
+        "minutes_above_8": 3525,
+        "seconds": 8.5
+      },
+      {
+        "profile": {
+          "name": "pharmacy",
+          "ambient_c": 30,
+          "leak": 0.00035,
+          "k_door": 0.002,
+          "margin": 3.0,
+          "noise": 0.05,
+          "door_per_hour": 2.0,
+          "degrades": false,
+          "faults": 1,
+          "held_out": false,
+          "cool_rate": 0.02835
+        },
+        "rows": 86212,
+        "days": 60,
+        "door_events": 1566,
+        "ajar_events": 24,
+        "power_failures": 14,
+        "degradation_arcs": 0,
+        "faults": 1,
+        "missing_segments": 3,
+        "minutes_above_8": 2375,
+        "seconds": 8.4
+      },
+      {
+        "profile": {
+          "name": "health-post",
+          "ambient_c": 36,
+          "leak": 0.00045,
+          "k_door": 0.0012,
+          "margin": 2.4,
+          "noise": 0.1,
+          "door_per_hour": 1.0,
+          "degrades": true,
+          "faults": 0,
+          "held_out": false,
+          "cool_rate": 0.03564
+        },
+        "rows": 86064,
+        "days": 60,
+        "door_events": 739,
+        "ajar_events": 37,
+        "power_failures": 15,
+        "degradation_arcs": 4,
+        "faults": 0,
+        "missing_segments": 3,
+        "minutes_above_8": 4225,
+        "seconds": 8.4
+      },
+      {
+        "profile": {
+          "name": "hospital-ward",
+          "ambient_c": 24,
+          "leak": 0.00025,
+          "k_door": 0.0018,
+          "margin": 3.5,
+          "noise": 0.04,
+          "door_per_hour": 1.8,
+          "degrades": false,
+          "faults": 0,
+          "held_out": false,
+          "cool_rate": 0.018375
+        },
+        "rows": 86211,
+        "days": 60,
+        "door_events": 1399,
+        "ajar_events": 18,
+        "power_failures": 15,
+        "degradation_arcs": 0,
+        "faults": 0,
+        "missing_segments": 3,
+        "minutes_above_8": 1360,
+        "seconds": 8.2
+      },
+      {
+        "profile": {
+          "name": "outreach-hub",
+          "ambient_c": 32,
+          "leak": 0.00038,
+          "k_door": 0.0016,
+          "margin": 2.8,
+          "noise": 0.06,
+          "door_per_hour": 1.3,
+          "degrades": true,
+          "faults": 1,
+          "held_out": false,
+          "cool_rate": 0.030856
+        },
+        "rows": 86071,
+        "days": 60,
+        "door_events": 1014,
+        "ajar_events": 23,
+        "power_failures": 16,
+        "degradation_arcs": 4,
+        "faults": 1,
+        "missing_segments": 3,
+        "minutes_above_8": 3308,
+        "seconds": 8.5
+      },
+      {
+        "profile": {
+          "name": "mobile-unit",
+          "ambient_c": 29,
+          "leak": 0.00042,
+          "k_door": 0.0014,
+          "margin": 2.7,
+          "noise": 0.07,
+          "door_per_hour": 1.4,
+          "degrades": true,
+          "faults": 1,
+          "held_out": true,
+          "cool_rate": 0.029484
+        },
+        "rows": 86317,
+        "days": 60,
+        "door_events": 1100,
+        "ajar_events": 34,
+        "power_failures": 12,
+        "degradation_arcs": 3,
+        "faults": 1,
+        "missing_segments": 3,
+        "minutes_above_8": 3266,
+        "seconds": 8.4
+      },
+      {
+        "profile": {
+          "name": "city-depot",
+          "ambient_c": 27,
+          "leak": 0.00028,
+          "k_door": 0.001,
+          "margin": 3.3,
+          "noise": 0.05,
+          "door_per_hour": 1.1,
+          "degrades": false,
+          "faults": 1,
+          "held_out": true,
+          "cool_rate": 0.022176
+        },
+        "rows": 86259,
+        "days": 60,
+        "door_events": 835,
+        "ajar_events": 24,
+        "power_failures": 13,
+        "degradation_arcs": 0,
+        "faults": 1,
+        "missing_segments": 3,
+        "minutes_above_8": 1489,
+        "seconds": 8.3
+      }
+    ],
+    "raw_rows": 689595,
+    "minutes_above_8_pct": 3.02,
+    "forecast_rows": 137822,
+    "health_rows": 11440,
+    "features": 42,
+    "health_features": 15,
+    "by_split": {
+      "gap": {
+        "forecast_rows": 216,
+        "breach_rows": 0,
+        "breach_rate": 0.0,
+        "health_rows": 287
+      },
+      "test": {
+        "forecast_rows": 51669,
+        "breach_rows": 3200,
+        "breach_rate": 0.062,
+        "health_rows": 4155
+      },
+      "train": {
+        "forecast_rows": 68823,
+        "breach_rows": 5314,
+        "breach_rate": 0.0773,
+        "health_rows": 5706
+      },
+      "val": {
+        "forecast_rows": 17114,
+        "breach_rows": 1102,
+        "breach_rate": 0.0645,
+        "health_rows": 1292
+      }
+    },
+    "held_out_profiles": [
+      "city-depot",
+      "mobile-unit"
+    ]
+  },
+  "forecast": {
+    "models": {
+      "hgb": {
+        "mae": 0.6532,
+        "rmse": 1.2362,
+        "r2": 0.4814,
+        "n": 51562
+      },
+      "random_forest": {
+        "mae": 0.6715,
+        "rmse": 1.2184,
+        "r2": 0.4963,
+        "n": 51562
+      },
+      "persistence": {
+        "mae": 1.183,
+        "rmse": 1.7681,
+        "r2": -0.0607,
+        "n": 51562
+      },
+      "linear": {
+        "mae": 3.4227,
+        "rmse": 4.5826,
+        "r2": -6.1255,
+        "n": 51562
+      },
+      "physics": {
+        "mae": 1.5827,
+        "rmse": 2.1654,
+        "r2": -0.5909,
+        "n": 51562
+      }
+    },
+    "interval": {
+      "coverage": 0.788,
+      "mean_width": 2.11,
+      "raw_quantile_coverage": 0.679,
+      "crossed_before_sorting": 57
+    },
+    "mae_by_horizon": {
+      "5": {
+        "hgb": 0.2002,
+        "persistence": 1.74,
+        "linear": 2.0479,
+        "physics": 0.8355
+      },
+      "10": {
+        "hgb": 0.3164,
+        "persistence": 1.3261,
+        "linear": 1.5752,
+        "physics": 1.1742
+      },
+      "20": {
+        "hgb": 0.511,
+        "persistence": 1.3687,
+        "linear": 2.7841,
+        "physics": 1.5255
+      },
+      "30": {
+        "hgb": 0.6536,
+        "persistence": 1.183,
+        "linear": 3.4227,
+        "physics": 1.5827
+      }
+    },
+    "mae_by_context": {
+      "normal": {
+        "hgb": 0.5328,
+        "persistence": 1.0882,
+        "n": 41880
+      },
+      "door_open": {
+        "hgb": 1.1081,
+        "persistence": 1.4755,
+        "n": 9042
+      },
+      "power_fail": {
+        "hgb": 2.1011,
+        "persistence": 3.2499,
+        "n": 640
+      }
+    },
+    "breach": {
+      "precision": 0.5228,
+      "recall": 0.5622,
+      "f1": 0.5418,
+      "f2": 0.5538,
+      "confusion": {
+        "tn": 46747,
+        "fp": 1642,
+        "fn": 1401,
+        "tp": 1799
+      },
+      "positives": 3200,
+      "n": 51589,
+      "roc_auc": 0.8754,
+      "pr_auc": 0.6105,
+      "false_alarms_per_fridge_day": 5.2451,
+      "fridge_days": 179.4062
+    },
+    "breach_by_method": {
+      "rule": {
+        "precision": 0.7038,
+        "recall": 0.4441,
+        "f1": 0.5445,
+        "f2": 0.4795,
+        "confusion": {
+          "tn": 47791,
+          "fp": 598,
+          "fn": 1779,
+          "tp": 1421
+        },
+        "positives": 3200,
+        "n": 51589,
+        "roc_auc": 0.8167,
+        "pr_auc": 0.5331
+      },
+      "classifier": {
+        "precision": 0.5228,
+        "recall": 0.5622,
+        "f1": 0.5418,
+        "f2": 0.5538,
+        "confusion": {
+          "tn": 46747,
+          "fp": 1642,
+          "fn": 1401,
+          "tp": 1799
+        },
+        "positives": 3200,
+        "n": 51589,
+        "roc_auc": 0.8754,
+        "pr_auc": 0.6105
+      }
+    },
+    "lead_time": {
+      "episodes": 282,
+      "warned_share": 0.8901,
+      "median_min": 2.0,
+      "p10_min": 1.0,
+      "median_including_missed_min": 2.0,
+      "share_at_least_10_min": 0.156,
+      "per_profile": {
+        "city-depot": {
+          "episodes": 31,
+          "warned": 31
+        },
+        "district-store": {
+          "episodes": 8,
+          "warned": 8
+        },
+        "health-post": {
+          "episodes": 14,
+          "warned": 13
+        },
+        "hospital-ward": {
+          "episodes": 22,
+          "warned": 20
+        },
+        "mobile-unit": {
+          "episodes": 123,
+          "warned": 118
+        },
+        "outreach-hub": {
+          "episodes": 20,
+          "warned": 18
+        },
+        "pharmacy": {
+          "episodes": 41,
+          "warned": 24
+        },
+        "rural-clinic": {
+          "episodes": 23,
+          "warned": 19
+        }
+      }
+    },
+    "selection": {
+      "params": {
+        "learning_rate": 0.05,
+        "max_leaf_nodes": 127
+      },
+      "grid": [
+        {
+          "learning_rate": 0.05,
+          "max_leaf_nodes": 63,
+          "val_mae": 0.6684
+        },
+        {
+          "learning_rate": 0.05,
+          "max_leaf_nodes": 127,
+          "val_mae": 0.6594
+        }
+      ],
+      "validation_choice": {
+        "rule": {
+          "precision": 0.7753,
+          "recall": 0.3194,
+          "f1": 0.4524,
+          "f2": 0.362,
+          "confusion": {
+            "tn": 15890,
+            "fp": 102,
+            "fn": 750,
+            "tp": 352
+          },
+          "positives": 1102,
+          "n": 17094
+        },
+        "classifier": {
+          "precision": 0.4247,
+          "recall": 0.4528,
+          "f1": 0.4383,
+          "f2": 0.4469,
+          "confusion": {
+            "tn": 15316,
+            "fp": 676,
+            "fn": 603,
+            "tp": 499
+          },
+          "positives": 1102,
+          "n": 17094,
+          "roc_auc": 0.8151,
+          "pr_auc": 0.4956
+        }
+      },
+      "method": "classifier",
+      "thresholds": {
+        "medium": 0.0958,
+        "high": 0.7143
+      },
+      "interval_margin": 0.1225
+    }
+  },
+  "beats_baselines": {
+    "persistence": true,
+    "linear": true,
+    "physics": true
+  },
+  "ablation": {
+    "all_features": {
+      "mae": 0.6536,
+      "rmse": 1.237,
+      "r2": 0.4808,
+      "n": 51562,
+      "breach_recall_pred_gt_8": 0.2665
+    },
+    "no_door": {
+      "mae": 0.6673,
+      "rmse": 1.268,
+      "r2": 0.4544,
+      "n": 51562,
+      "breach_recall_pred_gt_8": 0.2473
+    },
+    "no_compressor": {
+      "mae": 0.673,
+      "rmse": 1.2494,
+      "r2": 0.4703,
+      "n": 51562,
+      "breach_recall_pred_gt_8": 0.2658
+    }
+  },
+  "importance": {
+    "forecast": [
+      {
+        "feature": "temp_max_5",
+        "mae_increase": 0.1682
+      },
+      {
+        "feature": "comp_duty_15",
+        "mae_increase": 0.1415
+      },
+      {
+        "feature": "temp_slope_15",
+        "mae_increase": 0.1223
+      },
+      {
+        "feature": "temp_slope_30",
+        "mae_increase": 0.0966
+      },
+      {
+        "feature": "temp_now",
+        "mae_increase": 0.0827
+      },
+      {
+        "feature": "temp_slope_5",
+        "mae_increase": 0.0733
+      },
+      {
+        "feature": "comp_switches_60",
+        "mae_increase": 0.072
+      },
+      {
+        "feature": "temp_mean_15",
+        "mae_increase": 0.0602
+      },
+      {
+        "feature": "temp_std_5",
+        "mae_increase": 0.0524
+      },
+      {
+        "feature": "comp_duty_60",
+        "mae_increase": 0.0465
+      },
+      {
+        "feature": "time_to_8",
+        "mae_increase": 0.0447
+      },
+      {
+        "feature": "temp_std_15",
+        "mae_increase": 0.0305
+      }
+    ],
+    "health": [
+      {
+        "feature": "duty_24",
+        "mae_increase": 7.3531
+      },
+      {
+        "feature": "cool_rate_on",
+        "mae_increase": 5.5455
+      },
+      {
+        "feature": "off_duration_mean",
+        "mae_increase": 2.6219
+      },
+      {
+        "feature": "duty_trend",
+        "mae_increase": 1.6494
+      },
+      {
+        "feature": "cycles_per_hour",
+        "mae_increase": 1.3424
+      },
+      {
+        "feature": "pulldown_7_3",
+        "mae_increase": 0.7575
+      },
+      {
+        "feature": "on_duration_mean",
+        "mae_increase": 0.6119
+      },
+      {
+        "feature": "warm_rate_off",
+        "mae_increase": 0.4586
+      },
+      {
+        "feature": "frac_above_8",
+        "mae_increase": 0.3886
+      },
+      {
+        "feature": "longest_on_run",
+        "mae_increase": 0.2829
+      }
+    ]
+  },
+  "health": {
+    "final": {
+      "mae": 3.3132,
+      "rmse": 7.3864,
+      "r2": 0.8578,
+      "n": 4155
+    },
+    "model_only": {
+      "mae": 3.3193,
+      "rmse": 7.4773,
+      "r2": 0.8543,
+      "n": 4155
+    },
+    "blended_no_fallback": {
+      "mae": 3.3132,
+      "rmse": 7.3864,
+      "r2": 0.8578,
+      "n": 4155
+    },
+    "spearman": 0.7689,
+    "fallback_share": 0.0,
+    "fallback_mae": null,
+    "weakening": {
+      "arcs_in_test": 3,
+      "detected": 3,
+      "detection_delay_days": [
+        1.0,
+        0.4,
+        1.97
+      ],
+      "median_delay_days": 1.0,
+      "false_flag_rate_healthy": 0.0438,
+      "flag_rate_below_70": 0.9777
+    },
+    "selection": {
+      "params": {
+        "learning_rate": 0.05,
+        "max_leaf_nodes": 63
+      },
+      "grid": [
+        {
+          "learning_rate": 0.05,
+          "max_leaf_nodes": 63,
+          "val_mae": 1.496
+        },
+        {
+          "learning_rate": 0.05,
+          "max_leaf_nodes": 127,
+          "val_mae": 1.556
+        }
+      ],
+      "healthy_rows": 3718
+    }
+  },
+  "seconds": 368
+}

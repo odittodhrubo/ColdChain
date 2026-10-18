@@ -34,6 +34,7 @@ venv/
 ml/models/cache/
 ml/.cache/
 *.joblib
+!ml/models/*.joblib
 
 # platformio
 .pio/

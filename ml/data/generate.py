@@ -83,6 +83,7 @@ class Schedule:
     arcs: list[tuple[int, int, float]] = field(default_factory=list)  # (start, end, efficiency at the end)
     faults: list[tuple[int, int, float]] = field(default_factory=list)  # (start, duration, efficiency)
     missing: list[tuple[int, int]] = field(default_factory=list)  # (start, duration): rows dropped
+    ajar: list[tuple[int, int, float]] = field(default_factory=list)  # (start, duration, k_door while ajar)
 
 
 def _poisson_times(rng: random.Random, start: int, end: int, rate_per_s) -> list[int]:
@@ -136,6 +137,14 @@ def schedule(profile: Profile, days: int, seed: int) -> Schedule:
         t = int(rng.uniform(0.1, 0.9) * end)
         s.faults.append((t, int(rng.uniform(3, 24) * 3600), round(rng.uniform(0.15, 0.35), 3)))
 
+    # door left ajar: the switch reads open but the gap is small, so the compressor almost keeps up and the
+    # temperature creeps up over many minutes (k makes the heat gain at 7 °C r x the cooling capacity)
+    for t in _poisson_times(rng, 0, end - 7200, lambda t: (8 <= (t % DAY_S) // 3600 < 18) / DAY_S):
+        r = rng.uniform(0.9, 1.15)  # below 1 the compressor holds: a long "open" that never breaches
+        k = profile.cool_rate * r / (profile.ambient_c - 7.0) - profile.leak
+        if k > 0 and not any(a <= t <= a + d for a, d in s.doors):
+            s.ajar.append((t, int(60 * rng.uniform(20, 90)), round(k, 7)))
+
     for _ in range(max(1, days // 20)):
         s.missing.append((int(rng.uniform(0, end - 7200)), int(60 * rng.uniform(10, 90))))
     return s
@@ -164,11 +173,18 @@ def _intervals_mask(intervals: list[tuple[int, int]], n_steps: int) -> np.ndarra
     return mask
 
 
-def simulate(profile: Profile, days: int, seed: int = SEED) -> tuple[pd.DataFrame, Schedule]:
-    """One profile -> (1-minute rows, its schedule)."""
-    s = schedule(profile, days, seed)
+def simulate(
+    profile: Profile, days: int, seed: int = SEED, plan: Schedule | None = None
+) -> tuple[pd.DataFrame, Schedule]:
+    """One profile -> (1-minute rows, its schedule). `plan` replaces the random schedule (scenario
+    replays)."""
+    s = schedule(profile, days, seed) if plan is None else plan
     n = days * DAY_S // STEP_S
     door = _intervals_mask(s.doors, n)
+    door_k = np.where(door, profile.k_door, 0.0)
+    for a, dur, k in s.ajar:
+        door_k[a // STEP_S : (a + dur) // STEP_S + 1] = k
+    door |= door_k > 0
     on_battery = _intervals_mask(s.power_failures, n)
     rng = np.random.default_rng(_seed(seed, profile.name, "ambient"))
     minutes = days * 1440
@@ -201,6 +217,8 @@ def simulate(profile: Profile, days: int, seed: int = SEED) -> tuple[pd.DataFram
             params["T_AMBIENT_C"] = float(ambient[m])
             model.efficiency = float(eff[m])
         d = bool(door[k])
+        if d:
+            params["K_DOOR_PER_S"] = float(door_k[k])
         power.update(bool(on_battery[k]), STEP_S if k else 0.0)  # same order as FridgeNode.tick
         model.step(STEP_S if k else 0.0, d, comp.on)
         now_ms = t * 1000
@@ -259,6 +277,7 @@ def _run(args: tuple[Profile, int, int, Path]) -> dict:
         "rows": len(df),
         "days": days,
         "door_events": len(s.doors),
+        "ajar_events": len(s.ajar),
         "power_failures": len(s.power_failures),
         "degradation_arcs": len(s.arcs),
         "faults": len(s.faults),

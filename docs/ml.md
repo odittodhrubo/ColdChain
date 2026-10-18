@@ -38,3 +38,43 @@ The splits are never shuffled:
 - On the other profiles, the last 10 days are test, the 10 days before them are validation, and the rest is training.
 - Rows within 30 min before a boundary, and within the lookback after it, are marked `gap` and not used. The lookback is 60 min for forecasts and 24 h for health.
 - Anything fitted, such as scalers or thresholds, is fitted on training rows only.
+
+## Models and report (P17)
+
+```bash
+cd ml && ../.venv/Scripts/python -m train     # or: npm run ml:train / make train  (~6 min; builds the dataset if missing)
+```
+
+Outputs: `ml/models/{forecast,health}.joblib` and `model_card.json`; `ml/reports/metrics.json`, five figures and [`ml/reports/REPORT.md`](../ml/reports/REPORT.md). The report is rendered from `metrics.json`, so no number in it is typed by hand. `python report.py` re-renders it.
+
+- **Forecast (+30 min)**
+  - Histogram gradient boosting predicting the median (absolute-error loss). The size is chosen on validation MAE.
+  - p10 / p90 quantile models give the interval. The interval is conformalised on validation to reach 80 % coverage, then sorted, so `p10 ≤ pred ≤ p90` always holds.
+  - Compared against random forest and three baselines: persistence, linear extrapolation, and the physics model with the nominal firmware parameters (`modeling/baselines.py`).
+- **Breach warning**
+  - Two candidates: the forecast rule (`HIGH` if pred > 8 or p90 > 9; `MEDIUM` if p90 > 8) and a calibrated classifier, class-weighted in training only.
+  - The candidate with the better validation F2 (recall first) is chosen. Its thresholds are stored in the bundle.
+- **Compressor health**
+  - Gradient boosting on the 24 h cycle features, minus `20 × anomaly`. The anomaly signal is an IsolationForest fitted on healthy cycles, scaled to [0, 1].
+  - Fallback with fewer than 3 cycles: `100 × (cooling rate ON + warming rate OFF) / healthy median`.
+  - When no compressor data exists, the score is `insufficient` (NaN, band `UNKNOWN`).
+  - Bands: 80–100 `GOOD`, 50–79 `WEAKENING`, 0–49 `FAILING`.
+  - The weakening flag is set when health < 70 or the 24 h trend is below −5 points/day.
+- **Serving** (`modeling/predict.py`): `load()` reads only `ml/models`. It refuses a feature list that differs from `features.py`. `Forecaster.predict(X)` and `HealthModel.score(X)` take the vectors from `features.py`.
+- **Evaluation**, on the test split only:
+  - forecast MAE / RMSE / R² for every model and baseline;
+  - error by horizon and by condition (door open, power failure);
+  - interval coverage;
+  - breach precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix and false alarms per fridge-day;
+  - lead time, from a forecast every minute before each breach onset;
+  - health MAE, Spearman correlation and degradation detection delay;
+  - permutation importance and ablations.
+- **Tests** (`ml/tests/test_models.py`):
+  - metric functions;
+  - warning levels;
+  - quantile ordering;
+  - health bounds, fallback and the `insufficient` case;
+  - the trained models beat every baseline;
+  - a **door-left-ajar replay** on a held-out fridge warns at least 10 minutes before the temperature passes 8 °C.
+
+The trained bundles are committed (about 16 MB), so the service starts without training. Loading a bundle needs the scikit-learn version recorded in `model_card.json`.

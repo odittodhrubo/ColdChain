@@ -16,15 +16,16 @@
         "held_out": false,
         "cool_rate": 0.02208
       },
-      "rows": 86168,
+      "rows": 86185,
       "days": 60,
       "door_events": 959,
+      "ajar_events": 22,
       "power_failures": 15,
       "degradation_arcs": 0,
       "faults": 0,
       "missing_segments": 3,
-      "minutes_above_8": 560,
-      "seconds": 8.5
+      "minutes_above_8": 1283,
+      "seconds": 8.3
     },
     {
       "profile": {
@@ -40,15 +41,16 @@
         "held_out": false,
         "cool_rate": 0.03224
       },
-      "rows": 86255,
+      "rows": 86276,
       "days": 60,
       "door_events": 1209,
+      "ajar_events": 19,
       "power_failures": 14,
       "degradation_arcs": 4,
       "faults": 1,
       "missing_segments": 3,
-      "minutes_above_8": 2478,
-      "seconds": 8.6
+      "minutes_above_8": 3525,
+      "seconds": 8.5
     },
     {
       "profile": {
@@ -64,14 +66,15 @@
         "held_out": false,
         "cool_rate": 0.02835
       },
-      "rows": 86295,
+      "rows": 86212,
       "days": 60,
       "door_events": 1566,
+      "ajar_events": 24,
       "power_failures": 14,
       "degradation_arcs": 0,
       "faults": 1,
       "missing_segments": 3,
-      "minutes_above_8": 1722,
+      "minutes_above_8": 2375,
       "seconds": 8.4
     },
     {
@@ -88,15 +91,16 @@
         "held_out": false,
         "cool_rate": 0.03564
       },
-      "rows": 86115,
+      "rows": 86064,
       "days": 60,
       "door_events": 739,
+      "ajar_events": 37,
       "power_failures": 15,
       "degradation_arcs": 4,
       "faults": 0,
       "missing_segments": 3,
-      "minutes_above_8": 2205,
-      "seconds": 8.6
+      "minutes_above_8": 4225,
+      "seconds": 8.4
     },
     {
       "profile": {
@@ -112,15 +116,16 @@
         "held_out": false,
         "cool_rate": 0.018375
       },
-      "rows": 86156,
+      "rows": 86211,
       "days": 60,
       "door_events": 1399,
+      "ajar_events": 18,
       "power_failures": 15,
       "degradation_arcs": 0,
       "faults": 0,
       "missing_segments": 3,
-      "minutes_above_8": 642,
-      "seconds": 8.4
+      "minutes_above_8": 1360,
+      "seconds": 8.2
     },
     {
       "profile": {
@@ -136,15 +141,16 @@
         "held_out": false,
         "cool_rate": 0.030856
       },
-      "rows": 86131,
+      "rows": 86071,
       "days": 60,
       "door_events": 1014,
+      "ajar_events": 23,
       "power_failures": 16,
       "degradation_arcs": 4,
       "faults": 1,
       "missing_segments": 3,
-      "minutes_above_8": 2423,
-      "seconds": 8.4
+      "minutes_above_8": 3308,
+      "seconds": 8.5
     },
     {
       "profile": {
@@ -160,15 +166,16 @@
         "held_out": true,
         "cool_rate": 0.029484
       },
-      "rows": 86203,
+      "rows": 86317,
       "days": 60,
       "door_events": 1100,
+      "ajar_events": 34,
       "power_failures": 12,
       "degradation_arcs": 3,
       "faults": 1,
       "missing_segments": 3,
-      "minutes_above_8": 1294,
-      "seconds": 8.5
+      "minutes_above_8": 3266,
+      "seconds": 8.4
     },
     {
       "profile": {
@@ -184,21 +191,22 @@
         "held_out": true,
         "cool_rate": 0.022176
       },
-      "rows": 86230,
+      "rows": 86259,
       "days": 60,
       "door_events": 835,
+      "ajar_events": 24,
       "power_failures": 13,
       "degradation_arcs": 0,
       "faults": 1,
       "missing_segments": 3,
-      "minutes_above_8": 678,
-      "seconds": 8.2
+      "minutes_above_8": 1489,
+      "seconds": 8.3
     }
   ],
-  "raw_rows": 689553,
-  "minutes_above_8_pct": 1.74,
-  "forecast_rows": 137814,
-  "health_rows": 11443,
+  "raw_rows": 689595,
+  "minutes_above_8_pct": 3.02,
+  "forecast_rows": 137822,
+  "health_rows": 11440,
   "features": 42,
   "health_features": 15,
   "by_split": {
@@ -206,25 +214,25 @@
       "forecast_rows": 216,
       "breach_rows": 0,
       "breach_rate": 0.0,
-      "health_rows": 288
+      "health_rows": 287
     },
     "test": {
-      "forecast_rows": 51625,
-      "breach_rows": 2195,
-      "breach_rate": 0.0426,
-      "health_rows": 4154
+      "forecast_rows": 51669,
+      "breach_rows": 3200,
+      "breach_rate": 0.062,
+      "health_rows": 4155
     },
     "train": {
-      "forecast_rows": 68820,
-      "breach_rows": 4130,
-      "breach_rate": 0.0601,
-      "health_rows": 5707
+      "forecast_rows": 68823,
+      "breach_rows": 5314,
+      "breach_rate": 0.0773,
+      "health_rows": 5706
     },
     "val": {
-      "forecast_rows": 17153,
-      "breach_rows": 803,
-      "breach_rate": 0.0468,
-      "health_rows": 1294
+      "forecast_rows": 17114,
+      "breach_rows": 1102,
+      "breach_rate": 0.0645,
+      "health_rows": 1292
     }
   },
   "held_out_profiles": [
