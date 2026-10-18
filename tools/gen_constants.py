@@ -69,6 +69,7 @@ def render_py(scalars: dict, topics: dict) -> str:
 TARGETS = {
     ROOT / "firmware" / "fridge-node" / "include" / "constants.h": render_cpp,
     ROOT / "backend" / "src" / "shared" / "constants.ts": render_ts,
+    ROOT / "frontend" / "src" / "lib" / "constants.ts": render_ts,
     ROOT / "ml" / "constants.py": render_py,
 }
 

@@ -14,6 +14,7 @@ import { Ingestor, type IngestHooks } from './mqtt/ingest';
 import { HeatEngine } from './modules/exposure/engine';
 import { exposureRoutes } from './modules/exposure/routes';
 import { alertRoutes } from './modules/alerts/routes';
+import { fridgeRoutes } from './modules/fridges/routes';
 import { AlertEngine } from './modules/alerts/service';
 import { CommandTracker } from './mqtt/commands';
 import { silentRealtime } from './realtime';
@@ -75,6 +76,7 @@ export function createApp(config: Config, db: Db) {
     ...publicBatchRoutes(),
     ...exposureRoutes(),
     ...alertRoutes(),
+    ...fridgeRoutes(),
   ];
   const router = express.Router();
   mountRoutes(router, routes, ctx, authenticate(ctx));

@@ -50,10 +50,20 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 - Top bar: global status pill (all fridges safe, or open / critical alert counts, linking to Alerts), connection indicator, theme toggle, user menu with sign-out. A skip link jumps to the content.
 - DEMO banner on every screen when `/api/health` reports `demoScale ≠ 1`.
 
+## Dashboard and fridge detail (P14)
+
+- **Dashboard** (`pages/DashboardPage.tsx`): a summary strip (fridges Safe / Warning / Breach, batches Safe / At risk / Discard, open alerts, nodes offline, last updated), one card per fridge, its heat-budget panel, and the open-alerts feed with permission-aware Ack.
+- **Fridge card** (`dashboard/FridgeCard.tsx`): name + status chip; the temperature large, with a gauge showing the 2–8 °C band, the 3 / 7 °C compressor thresholds and a gliding needle; door (open for mm:ss, an alarm with a pulsing bell past 60 s), power (Mains / Battery with a battery bar and "since"), compressor (on, or the off-timer until restart is allowed), link (online / offline, last seen, "buffered n readings, syncing…"), the red **DISCARD LATCH** banner with an Admin-only **Reset** (reason required, waits for the node's confirmation), and a 30-minute sparkline. After 20 s without data the card turns grey and says "No data for n s".
+- **Heat budget panel**: every batch in the fridge, lowest remaining first: a budget bar (green, amber from 50 %, orange below 20 %, red and struck at 0), minutes used, how it accrues right now (`accruing ×1` above 8 °C, `×2` above 12 °C), status chip. A row opens the batch drawer with the cumulative exposure chart against the 60-minute line.
+- **Fridge detail** (`/fridges/:id`): Recharts history for 15 min / 1 h / 6 h / 24 h (server-side buckets, ≤ 600 points) with the safe band shaded, 8 °C and 12 °C lines, compressor-running strips, door-open and power-failure markers, diamonds where data arrived late through sync, and a tooltip with exact values; the event timeline (door, power, alarm, latch, Wi-Fi / sync, with a "synced" tag for late events); recent readings with a `late · synced` flag; a reserved panel for the AI forecast and health score (P19).
+- Status shown is always the server's (`live.state` from the shared `classify()`), never recomputed differently; timers use server timestamps (`lib/time.ts`). Pure rules live in `dashboard/logic.ts` and are unit-tested, including against the shared status vectors.
+- Thresholds come from `src/lib/constants.ts`, generated from `contracts/constants.json` like the other targets.
+
 ## Development
 
 ```bash
 npm --prefix frontend run dev     # Vite on :5173, proxies /api and /socket.io to the backend on :4000
 npm --prefix frontend test        # vitest + Testing Library
 npm --prefix frontend run lint    # eslint + tsc
+npm --prefix frontend run e2e     # Playwright smoke test: starts a seeded backend (:4310) and Vite (:5310)
 ```

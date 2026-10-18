@@ -5,6 +5,9 @@ import { AuthProvider } from './auth/AuthProvider';
 import { RequireAuth, RequirePermission } from './auth/guards';
 import { AppShell } from './layout/AppShell';
 import { shouldRetry } from './lib/api';
+import { DashboardPage } from './pages/DashboardPage';
+import { FridgeDetailPage } from './pages/FridgeDetailPage';
+import { FridgesPage } from './pages/FridgesPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NoPermissionPage';
 import { PlannedPage } from './pages/PlannedPage';
@@ -48,22 +51,9 @@ export function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route
-          index
-          element={
-            <PlannedPage title="Dashboard" subtitle="Every fridge and batch at a glance">
-              Live temperature, door, power, compressor and heat-budget status for every fridge.
-            </PlannedPage>
-          }
-        />
-        <Route
-          path="fridges/*"
-          element={
-            <PlannedPage title="Fridges" subtitle="Live readings and history per fridge">
-              Temperature history, events and controls for each fridge.
-            </PlannedPage>
-          }
-        />
+        <Route index element={<DashboardPage />} />
+        <Route path="fridges" element={<FridgesPage />} />
+        <Route path="fridges/:id" element={<FridgeDetailPage />} />
         <Route
           path="inventory/*"
           element={

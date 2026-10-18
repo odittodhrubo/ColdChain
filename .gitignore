@@ -48,3 +48,7 @@ tools/.state/
 .impeccable/review/
 .impeccable/questions/
 .impeccable/mocks/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/

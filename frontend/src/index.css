@@ -170,6 +170,20 @@
   animation: vvm-pulse 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* a reading that changed flashes once, so the eye catches it */
+@keyframes value-flash {
+  0% {
+    background-color: color-mix(in oklab, var(--teal) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.value-flash {
+  border-radius: 4px;
+  animation: value-flash 900ms ease-out;
+}
+
 @keyframes skeleton {
   50% {
     opacity: 0.55;

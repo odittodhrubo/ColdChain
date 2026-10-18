@@ -66,6 +66,10 @@ export interface LiveState {
   rssi: number;
   online: boolean;
   last_seen: number; // unix ms of the last accepted message
+  // since when the current condition holds (device event time, unix s): door open, on battery, compressor off
+  door_open_at: number | null;
+  battery_since: number | null;
+  comp_off_at: number | null; // the 60 s minimum off-time counts from here
 }
 
 /** Extension points for later prompts: heat engine (P11), alerts and commands (P12). */
@@ -150,6 +154,9 @@ export class Ingestor {
          UNION SELECT seq FROM events WHERE device_id = ? AND seq > ? ORDER BY seq LIMIT 500`,
       ),
       purge: db.prepare('DELETE FROM nonces WHERE expires_at < ?'),
+      lastEvent: db
+        .prepare('SELECT ts FROM events WHERE device_id = ? AND type = ? ORDER BY ts DESC, seq DESC LIMIT 1')
+        .pluck(),
     };
   }
 
@@ -263,6 +270,18 @@ export class Ingestor {
     if (state !== t.state)
       logger.debug({ deviceId, seq: t.seq, server: state, device: t.state }, 'STATE_MISMATCH');
     const prev = this.live.get(fridgeId);
+    const since = (
+      on: boolean,
+      wasOn: boolean | undefined,
+      kept: number | null | undefined,
+      event: string,
+      fallback: number | null = t.ts, // no event on record: from this reading
+    ) =>
+      on
+        ? wasOn
+          ? (kept ?? null)
+          : ((this.sql.lastEvent.get(deviceId, event) as number | undefined) ?? fallback)
+        : null;
     if (!prev || t.seq >= prev.seq) {
       const live: LiveState = {
         fridge_id: fridgeId,
@@ -283,6 +302,14 @@ export class Ingestor {
         rssi: t.rssi,
         online: true,
         last_seen: nowMs,
+        door_open_at: since(t.door === 1, prev && prev.door === 1, prev?.door_open_at, 'DOOR_OPEN'),
+        battery_since: since(
+          t.power === 'BATTERY',
+          prev && prev.power === 'BATTERY',
+          prev?.battery_since,
+          'POWER_FAIL',
+        ),
+        comp_off_at: since(t.comp === 0, prev && prev.comp === 0, prev?.comp_off_at, 'COMP_OFF', null), // off since boot: no timer
       };
       this.live.set(fridgeId, live);
       this.ctx.realtime.emit('fridge:update', live);

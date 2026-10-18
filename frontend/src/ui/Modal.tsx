@@ -23,8 +23,15 @@ export function Modal({
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal?.();
-    if (!open && d.open) d.close?.();
+    // showModal where supported; a plain open attribute elsewhere (old browsers, jsdom)
+    if (open && !d.open) {
+      if (typeof d.showModal === 'function') d.showModal();
+      else d.setAttribute('open', '');
+    }
+    if (!open && d.open) {
+      if (typeof d.close === 'function') d.close();
+      else d.removeAttribute('open');
+    }
   }, [open]);
   return (
     <dialog

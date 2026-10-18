@@ -4,7 +4,7 @@ These rules bind the firmware, backend, frontend, ML service and tools. Change a
 
 Machine-readable sources:
 
-- [`contracts/constants.json`](../contracts/constants.json): every threshold, timing and topic template. `tools/gen_constants.py` generates `firmware/fridge-node/include/constants.h`, `backend/src/shared/constants.ts` and `ml/constants.py`. Never hard-code these values anywhere else.
+- [`contracts/constants.json`](../contracts/constants.json): every threshold, timing and topic template. `tools/gen_constants.py` generates `firmware/fridge-node/include/constants.h`, `backend/src/shared/constants.ts`, `frontend/src/lib/constants.ts` and `ml/constants.py`. Never hard-code these values anywhere else.
 - [`contracts/test_vectors.json`](../contracts/test_vectors.json): HMAC, status and exposure vectors, computed by `tools/gen_vectors.js`, which also emits `firmware/fridge-node/include/test_vectors.h` for the firmware tests. Firmware, backend and the virtual node must all pass them.
 
 `make check` (or `npm run check:gen`) fails when either generated output is stale. `make test` runs that check first.

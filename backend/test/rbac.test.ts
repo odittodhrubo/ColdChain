@@ -77,6 +77,9 @@ const EXAMPLES: Record<string, Example> = {
   'POST /api/fridges/:id/buzzer-test': async (t) => ({
     path: `/api/fridges/${fridgeWithDevice(t)}/buzzer-test`,
   }),
+  'GET /api/fridges': async () => ({}),
+  'GET /api/fridges/:id': async (t) => ({ path: `/api/fridges/${addFridge(t)}` }),
+  'GET /api/fridges/:id/readings': async (t) => ({ path: `/api/fridges/${addFridge(t)}/readings?bucket=60` }),
   'GET /api/commands/:id': async (t) => ({
     path: `/api/commands/${ctxOf(t).commands.send(`dev-${fridgeWithDevice(t)}`, 'BUZZER_TEST')}`,
   }),
