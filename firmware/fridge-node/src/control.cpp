@@ -1,0 +1,33 @@
+#include "control.h"
+
+#include "constants.h"
+#include "node_config.h"
+
+bool CompressorControl::minOffElapsed(uint32_t now_ms) const {
+  return !has_switched_off_ || now_ms - changed_at_ms_ >= cc::COMP_MIN_OFF_S * 1000u;
+}
+
+void CompressorControl::set(bool on, uint32_t now_ms) {
+  on_ = on;
+  changed_at_ms_ = now_ms;
+  if (!on) has_switched_off_ = true;
+}
+
+bool CompressorControl::update(float temp, bool sensor_fault, bool force_off, uint32_t now_ms) {
+  const bool was_on = on_;
+  if (force_off) {
+    set(false, now_ms);  // re-armed every call, so the 60 s min-off counts from when the force ends
+  } else if (sensor_fault) {
+    const uint32_t in_state_ms = now_ms - changed_at_ms_;
+    if (on_ && in_state_ms >= cfg::FAULT_DUTY_ON_S * 1000u) {
+      set(false, now_ms);
+    } else if (!on_ && minOffElapsed(now_ms) && (!has_switched_off_ || in_state_ms >= cfg::FAULT_DUTY_OFF_S * 1000u)) {
+      set(true, now_ms);
+    }
+  } else if (on_ && temp <= cc::COMP_OFF_AT_C) {
+    set(false, now_ms);
+  } else if (!on_ && temp >= cc::COMP_ON_AT_C && minOffElapsed(now_ms)) {
+    set(true, now_ms);
+  }
+  return on_ != was_on;
+}

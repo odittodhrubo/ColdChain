@@ -1,0 +1,36 @@
+#include "thermal_model.h"
+
+#include <math.h>
+
+#include "node_config.h"
+
+ThermalModel::ThermalModel(uint32_t seed)
+    : temp_(cfg::T_INITIAL_C), speed_(cfg::THERMAL_SPEED), rng_(seed ? seed : 1u) {}
+
+void ThermalModel::step(float real_dt_s, bool door_open, bool comp_on) {
+  float remaining = real_dt_s * speed_;
+  while (remaining > 0) {
+    const float dt = remaining < cfg::MAX_STEP_S ? remaining : cfg::MAX_STEP_S;
+    const float gap = cfg::T_AMBIENT_C - temp_;
+    float dTdt = cfg::K_LEAK_PER_S * gap;
+    if (door_open) dTdt += cfg::K_DOOR_PER_S * gap;
+    if (comp_on) dTdt -= cfg::COOL_RATE_C_PER_S * efficiency_;
+    temp_ += dTdt * dt;
+    remaining -= dt;
+  }
+}
+
+float ThermalModel::read() { return temp_ + cfg::NOISE_SIGMA_C * gaussian(); }
+
+// xorshift32 + Box-Muller: deterministic for a given seed, no <random> needed on the ESP32.
+float ThermalModel::gaussian() {
+  auto uniform = [this]() {
+    rng_ ^= rng_ << 13;
+    rng_ ^= rng_ >> 17;
+    rng_ ^= rng_ << 5;
+    return (static_cast<float>(rng_ >> 8) + 1.0f) / 16777217.0f;  // (0, 1]
+  };
+  const float u1 = uniform();
+  const float u2 = uniform();
+  return sqrtf(-2.0f * logf(u1)) * cosf(6.2831853f * u2);
+}

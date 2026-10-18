@@ -1,0 +1,13 @@
+// DS18B20 probe for manual mode. Conversions are asynchronous: request, come back DS_CONVERSION_MS later, read.
+// The loop never waits the 750 ms a 12-bit conversion takes.
+#pragma once
+#include <stdint.h>
+
+namespace sensors {
+void begin();  // one blocking first conversion in setup(), so manual mode has a value at boot
+void update(uint32_t now_ms);
+float tempC();  // last valid reading, NAN if none yet
+// True when the probe is missing, returns -127 (disconnected) or 85 (power-on value), or has not produced a
+// valid reading for DS_STALE_MS.
+bool fault();
+}  // namespace sensors

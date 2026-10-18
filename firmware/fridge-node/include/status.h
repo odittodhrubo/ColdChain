@@ -1,0 +1,10 @@
+// Fridge status classification (contract: docs/CONTRACTS.md section 2). Pure and platform-independent so the
+// native tests run it against contracts/test_vectors.json, the same vectors the backend uses.
+#pragma once
+
+enum class FridgeState { SAFE, WARNING, BREACH };
+
+// Precedence BREACH > WARNING > SAFE. A NaN temperature counts as a sensor fault.
+FridgeState classify(float temp, bool door_open, bool on_battery, bool sensor_fault);
+
+const char* stateName(FridgeState s);
