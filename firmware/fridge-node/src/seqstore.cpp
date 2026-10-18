@@ -1,0 +1,27 @@
+#include "seqstore.h"
+
+namespace {
+constexpr const char* KEY = "seq";
+}
+
+void SeqStore::begin() {
+  last_ = kv_.getU32(KEY, 0) + SAVE_EVERY;
+  saved_ = last_;
+  kv_.putU32(KEY, saved_);
+}
+
+uint32_t SeqStore::next() {
+  ++last_;
+  // Invariant: last_ < saved_ + SAVE_EVERY, so seqs after the next boot's start (saved_ + SAVE_EVERY) are unused.
+  if (last_ - saved_ >= SAVE_EVERY) {
+    saved_ = last_;
+    kv_.putU32(KEY, saved_);
+  }
+  return last_;
+}
+
+void SeqStore::flush() {
+  if (saved_ == last_) return;
+  saved_ = last_;
+  kv_.putU32(KEY, saved_);
+}

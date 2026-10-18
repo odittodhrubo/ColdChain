@@ -163,7 +163,7 @@ The same firmware runs on a real board: the pins stay exactly as in the wiring t
 | `BUZZER_IS_ACTIVE` | `0` (passive piezo, `tone()`) | `1` for an active buzzer module |
 | `OLED_I2C_ADDR` | `0x3C` | `0x3D` on some modules |
 | `POWER_SENSE_IS_LEVEL` | not set (POWER FAIL button toggles) | `1`: GPIO32 reads a mains-present level from a 10 kΩ/20 kΩ divider on the 5 V adapter rail (HIGH = mains, LOW = on battery). Honoured from P05 |
-| Wi-Fi, broker, device secret | `Wokwi-GUEST`, cloud broker | your SSID/password, broker with a pinned CA (added in P03) |
+| Wi-Fi, broker, device secret | `Wokwi-GUEST`, cloud broker, `ALLOW_INSECURE_TLS` | your SSID/password; remove `ALLOW_INSECURE_TLS` and set `MQTT_CA_CERT` to pin the broker's root CA (see [firmware.md](firmware.md#networking)) |
 
 Battery backup: the Li-ion cell (via TP4056 + boost/UPS board) powers only the ESP32, sensor, OLED and buzzer. The compressor stays on mains, which is why the firmware forces the compressor OFF on battery (P05).
 

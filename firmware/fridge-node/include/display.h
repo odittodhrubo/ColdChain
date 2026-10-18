@@ -1,9 +1,10 @@
 // 128x64 SSD1306 status screen:
-//   FRIDGE-01            SAFE      header, inverted video on BREACH
-//   4.6 °C                         large temperature (or SENSOR FAULT)
+//   FRIDGE-01 SIM        SAFE      header (SIM = thermal model, MAN = DS18B20), inverted video on BREACH
+//   4.6 °C                         size-2 temperature (--.- on a sensor fault)
+//   BUDGET 100%                    or SENSOR FAULT / DOOR OPEN! / DISCARD - RESET REQ / AT RISK nn%
 //   DOOR:CLOSED COMP:ON
 //   PWR:MAINS BAT:100%
-//   <footer>                       reserved for connectivity (WIFI/MQTT/BUF, P03/P05); shows the mode until then
+//   WIFI√ MQTT√ SEQ 1234           connectivity footer, or OFFLINE buf:N / SYNC buf:N / SYNCING TIME
 // Redraws at 2 Hz, or at once when a discrete field changes; never every loop (I2C transfer is ~12 ms).
 #pragma once
 #include <stdint.h>
@@ -19,9 +20,18 @@ struct DisplayData {
   bool onBattery;
   uint8_t battPct;
   bool manualMode;
+  bool wifi;
+  bool mqtt;
+  uint32_t seq;
+  const char* netNote;  // replaces the footer when set (SYNCING TIME, HMAC FAIL, ...)
+  bool latch;           // DISCARD latch
+  bool atRisk;          // remaining budget below AT_RISK_PCT
+  uint8_t budgetPct;    // remaining heat budget, 0-100
+  bool doorAlarm;       // door open > DOOR_ALARM_S (P05)
 };
 
 namespace display {
 bool begin(const char* fridge_id);  // false if no SSD1306 answers at OLED_I2C_ADDR
 void update(const DisplayData& d, uint32_t now_ms);
+void setPower(bool on);  // DEAD battery: panel off; the next update() after power-on redraws at once
 }  // namespace display

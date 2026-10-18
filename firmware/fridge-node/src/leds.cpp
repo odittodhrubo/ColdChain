@@ -27,4 +27,8 @@ void update(FridgeState s, uint32_t now_ms) {
 void setLatch(bool on) { latched = on; }
 bool latch() { return latched; }
 
+void off() {
+  for (uint8_t pin : {pins::PIN_LED_GREEN, pins::PIN_LED_YELLOW, pins::PIN_LED_RED}) digitalWrite(pin, LOW);
+}
+
 }  // namespace leds

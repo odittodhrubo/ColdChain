@@ -9,6 +9,11 @@
 #define THERMAL_SPEED_DEFAULT 1.0f
 #endif
 
+// Battery drain on BATTERY power, % per minute. Demo builds may pass -DBATT_DRAIN_PCT_PER_MIN=6.
+#ifndef BATT_DRAIN_PCT_PER_MIN
+#define BATT_DRAIN_PCT_PER_MIN 2.0f
+#endif
+
 // SSD1306 I2C clock while drawing. 800 kHz keeps a full-frame transfer near 12 ms (400 kHz takes ~23 ms and
 // breaks the 20 ms loop budget). Set 400000 in config.h for modules that misbehave above spec.
 #ifndef OLED_I2C_HZ
@@ -40,5 +45,15 @@ constexpr uint32_t DEBOUNCE_MS = 30;
 constexpr uint32_t OLED_REFRESH_MS = 500;  // 2 Hz, plus an immediate redraw when a discrete field changes
 constexpr uint32_t RED_BLINK_HALF_MS = 500;  // 1 Hz blink on BREACH
 constexpr uint32_t STATUS_LINE_MS = 5000;
+
+// ---- power simulation (P05)
+constexpr float BATT_DRAIN_PER_MIN = BATT_DRAIN_PCT_PER_MIN;
+constexpr float BATT_CHARGE_PER_MIN = 5.0f;
+constexpr float BATT_LOW_PCT = 20.0f;
+
+// ---- offline sync (P05): stop-and-wait, one chunk in flight
+constexpr uint32_t SYNC_ACK_TIMEOUT_MS = 5000;  // resend the same chunk (fresh ts + nonce) after this
+constexpr uint32_t SYNC_MAX_RETRIES = 5;
+constexpr uint32_t SYNC_BACKOFF_MS = 60000;  // pause after SYNC_MAX_RETRIES unanswered sends
 
 }  // namespace cfg

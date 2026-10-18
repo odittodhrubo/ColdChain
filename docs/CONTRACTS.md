@@ -4,7 +4,7 @@ These rules bind the firmware, backend, frontend, ML service and tools. Change a
 
 Machine-readable sources:
 
-- [`contracts/constants.json`](../contracts/constants.json): every threshold, timing and topic template. `tools/gen_constants.py` generates `firmware/fridge-node/include/constants.h`, `backend/src/shared/constants.ts` and `ml/constants.py`. Never hard-code these values anywhere else.
+- [`contracts/constants.json`](../contracts/constants.json): every threshold, timing and topic template. `tools/gen_constants.py` generates `firmware/fridge-node/include/constants.h`, `backend/src/shared/constants.ts`, `frontend/src/lib/constants.ts` and `ml/constants.py`. Never hard-code these values anywhere else.
 - [`contracts/test_vectors.json`](../contracts/test_vectors.json): HMAC, status and exposure vectors, computed by `tools/gen_vectors.js`, which also emits `firmware/fridge-node/include/test_vectors.h` for the firmware tests. Firmware, backend and the virtual node must all pass them.
 
 `make check` (or `npm run check:gen`) fails when either generated output is stale. `make test` runs that check first.
@@ -87,15 +87,16 @@ All topics except `status`:
 
 - **telemetry:** `{"seq":int,"ts":int,"temp":float,"door":0|1,"comp":0|1,"power":"MAINS"|"BATTERY","batt":int,"state":"SAFE|WARNING|BREACH","exp_s":int,"latch":0|1,"mode":"model|manual","buf":int,"rssi":int,"fw":"1.0.0","reason":"periodic|door"}`
 - **event:** `{"seq":int,"ts":int,"type":"DOOR_OPEN|DOOR_CLOSE|DOOR_ALARM|POWER_FAIL|POWER_RESTORE|BATT_LOW|COMP_ON|COMP_OFF|LATCH_SET|LATCH_RESET|WIFI_LOST|WIFI_BACK|SENSOR_FAULT|BOOT","data":{}}`
-- **sync:** `{"from_seq":int,"to_seq":int,"readings":[<telemetry body without "buf","rssi","fw">...]}`, ordered oldest → newest, at most `SYNC_CHUNK` readings.
-- **ack** (server → device): `{"seq_upto":int}` = highest contiguous seq stored.
+- **telemetry** may also carry `"dropped":int` (readings lost to an offline-buffer overflow). It is present only when > 0.
+- **sync:** `{"from_seq":int,"to_seq":int,"readings":[<telemetry body without "buf","rssi","fw">...]}`, ordered oldest → newest, at most `SYNC_CHUNK` items. Events raised while offline share the same seq counter, so they travel in the same array as event bodies (`{"seq","ts","type","data":{}}`, recognised by the `type` key; buffered events keep type, seq and ts, not `data`). `from_seq`/`to_seq` are the first and last item's seq.
+- **ack** (server → device): `{"seq_upto":int}` = highest contiguous seq stored. After storing every item of a chunk (duplicates ignored via `UNIQUE(device_id, seq)`), the server acks at least that chunk's `to_seq`, idempotently: a resent chunk gets the same ack again, never an error. "Contiguous" is counted from the chunk's `from_seq`. The device holds nothing older, and seqs inside `[from_seq, to_seq]` that are not in the chunk were sent live, not buffered. Past `to_seq` the ack advances only through seqs actually stored. So an ack never covers data the device still holds and the server lacks, and a reboot seq jump or a lost live message can never stall the sync. The device frees buffered items with `seq <= seq_upto`, never earlier, and ignores an ack below its oldest buffered seq. Acks are signed with the device secret and verified like commands (timestamp window, HMAC, nonce).
 - **cmd** (server → device): `{"cmd_id":"uuid","type":"RESET_LATCH|SET_LATCH|BUZZER_TEST|SYNC_REQUEST","args":{}}`
 - **cmdack:** `{"cmd_id":"uuid","ok":true,"detail":"..."}`
 - `seq` is one monotonically increasing counter per device across telemetry and events, persisted in NVS so it survives reboot.
 
 ## 6. Core data model (SQLite)
 
-`users`, `devices` (device_id, fridge_id, secret encrypted with `APP_SECRET_KEY`, active), `fridges` (id, name, capacity, latch_state), `readings` (UNIQUE device_id + seq), `events`, `batches` (id, public_token, name, lot, quantity, expiry_date, criticality 1–3, status, weighted_exposure_s, discarded_at, acknowledged_by), `batch_assignments` (batch_id, fridge_id, from_ts, to_ts), `alerts`, `nonces`, `security_events`, `audit_log` (hash chain), `relocation_plans`, `ml_predictions`.
+`users`, `devices` (device_id, fridge_id, secret encrypted with `APP_SECRET_KEY`, active), `fridges` (id, name, capacity, latch_state), `readings` (UNIQUE device_id + seq), `events`, `batches` (id, public_token, name, manufacturer, lot_number, quantity, expiry_date, criticality 1–3, status, exposure_ms (weighted, integer ms; APIs show weighted_exposure_s), discarded_at, acknowledged_by, acknowledged_at, created_by, deleted_at), `batch_assignments` (batch_id, fridge_id, from_ts, to_ts), `alerts`, `nonces`, `security_events`, `audit_log` (hash chain), `relocation_plans`, `ml_predictions`.
 
 ## 7. REST API surface
 
@@ -105,9 +106,10 @@ All topics except `status`:
 | Auth | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` |
 | Users (Admin) | `GET/POST /api/users`, `PATCH/DELETE /api/users/:id` |
 | Fridges | `GET /api/fridges`, `GET /api/fridges/:id`, `GET /api/fridges/:id/readings?from&to&bucket`, `POST /api/fridges/:id/reset-latch` (Admin) |
-| Batches | `GET/POST /api/batches`, `GET/PATCH /api/batches/:id`, `POST /api/batches/:id/move`, `GET /api/batches/:id/qr` |
+| Batches | `GET/POST /api/batches`, `GET/PATCH/DELETE /api/batches/:id` (DELETE: Admin), `POST /api/batches/:id/move`, `GET /api/batches/:id/qr`, `GET /api/batches/:id/exposure` |
 | Public | `GET /api/public/batch/:token` (no auth) |
 | Alerts | `GET /api/alerts`, `POST /api/alerts/:id/ack` |
+| Devices | `POST /api/fridges/:id/buzzer-test` (Admin, Pharmacist), `GET /api/commands/:id` |
 | Security | `GET /api/security/events` |
 | Audit | `GET /api/audit`, `GET /api/audit/verify` |
 | AI | `GET /api/ml/predictions/:fridgeId`, `GET /api/ml/report` |

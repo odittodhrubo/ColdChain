@@ -1,22 +1,33 @@
-import path from 'node:path';
-import dotenv from 'dotenv';
 import { createApp } from './app';
-import { ConfigError, loadConfig, type Config } from './config';
+import { openDb } from './db';
+import { loadEnvOrExit } from './env';
+import { startJobs } from './jobs';
+import { startMqtt } from './mqtt/client';
+import { attachSocketIO } from './realtime';
+import type { AppContext } from './shared/http';
+import { logger } from './shared/logger';
 
-// .env normally lives at the repo root; a backend/.env takes precedence when present.
-dotenv.config({ path: [path.resolve('.env'), path.resolve('..', '.env')], quiet: true });
+const config = loadEnvOrExit();
+const db = openDb(config.DB_PATH);
+const app = createApp(config, db);
+const ctx = app.locals.ctx as AppContext;
 
-let config: Config;
-try {
-  config = loadConfig();
-} catch (err) {
-  if (err instanceof ConfigError) {
-    console.error(err.message);
-    process.exit(1);
-  }
-  throw err;
-}
-
-createApp(config).listen(config.PORT, () => {
-  console.log(`backend listening on http://localhost:${config.PORT} (${config.NODE_ENV})`);
+const server = app.listen(config.PORT, () => {
+  logger.info(`backend listening on http://localhost:${config.PORT} (${config.NODE_ENV})`);
 });
+ctx.realtime = attachSocketIO(server, ctx);
+const stopMqtt = startMqtt(config, ctx.ingest);
+const stopJobs = startJobs(ctx);
+
+function shutdown(signal: string) {
+  logger.info({ signal }, 'shutting down');
+  stopJobs(); // writes pending audit entries before the process exits
+  void stopMqtt().finally(() =>
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    }),
+  );
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -4,7 +4,7 @@ FastRoboX 1.0 IoT Hackathon, Round 1. Vaccines and insulin lose effectiveness ou
 
 Two simulated **ESP32 fridge nodes** (Wokwi) each read temperature and door state, run a hysteresis-controlled compressor relay, show status on an OLED and publish **HMAC-signed MQTT** messages. A **backend** verifies every message (signature, timestamp, nonce), stores readings, tracks a **60-minute heat-exposure budget per batch**, raises alerts and writes a **hash-chained audit log**. A **React web app** gives role-based access (Admin / Pharmacist / Inspector), a live dashboard, inventory with QR codes and a **public QR check page**. An **AI service** forecasts fridge temperature 30 minutes ahead, scores compressor health 0–100 and proposes which batches to move where, which a pharmacist confirms with one click.
 
-> Status: **P02 firmware core** (local control loop, no networking yet). Services expose health endpoints only; features land prompt by prompt (P03–P21).
+> Status: **P14 live dashboard and fridge detail** on top of the frontend foundation (design system, login, role-aware shell, realtime layer), alerts and device commands, the heat-exposure budget engine, inventory and QR check, secure MQTT ingestion, the audit chain, backend foundation, fridge node and tools. Features land prompt by prompt (P15–P21).
 
 ## Architecture
 
@@ -42,10 +42,10 @@ Wokwi's simulated Wi-Fi (`Wokwi-GUEST`) reaches the public internet but **not** 
 | `backend/` | Node 20 + TypeScript + Express API (`GET /api/health`) |
 | `frontend/` | React 18 + Vite + TypeScript + Tailwind |
 | `ml/` | FastAPI service (`GET /health`) |
-| `tools/` | Python package `coldchain_tools`, constant/vector generators, test runner |
+| `tools/` | Python package `coldchain_tools` (virtual node, simulation engine, attack / tamper / verify tools, see [docs/tools.md](docs/tools.md)), constant/vector generators, test runner |
 | `contracts/` | `constants.json` and `test_vectors.json`: the single source of truth |
 | `infra/` | Docker Compose and Mosquitto config |
-| `docs/` | [Shared contracts](docs/CONTRACTS.md), [hardware](docs/hardware.md), [firmware](docs/firmware.md) and, later, API, security and AI docs |
+| `docs/` | [Shared contracts](docs/CONTRACTS.md), [hardware](docs/hardware.md), [firmware](docs/firmware.md), [tools](docs/tools.md), [backend](docs/backend.md), [frontend](docs/frontend.md) and, later, API, security and AI docs |
 
 ## Prerequisites
 
@@ -76,10 +76,14 @@ npm run setup                 # backend + frontend node_modules
 python -m venv .venv          # Python env for ml/ and tools/
 .venv/Scripts/python -m pip install -r ml/requirements-dev.txt -e "tools[dev]"   # Windows
 # .venv/bin/python -m pip install -r ml/requirements-dev.txt -e "tools[dev]"     # macOS / Linux
-npm run env:init              # .env from .env.example with generated JWT_SECRET and APP_SECRET_KEY
+npm run env:init              # .env from .env.example with generated JWT_SECRET, APP_SECRET_KEY, device secrets
 ```
 
-With `make` the first three lines are `make setup`. Then fill in `MQTT_*` (and alerts) in `.env`.
+With `make` the first three lines are `make setup`. Then fill in `MQTT_*` (and alerts) in `.env`, and generate the firmware's git-ignored `config.h` from it (same broker, same device secrets):
+
+```bash
+node tools/init_firmware_config.js        # --force to regenerate
+```
 
 Run everything in Docker:
 
@@ -124,6 +128,7 @@ Thresholds, timings and topics live only in [`contracts/constants.json`](contrac
 
 - `firmware/fridge-node/include/constants.h`
 - `backend/src/shared/constants.ts`
+- `frontend/src/lib/constants.ts`
 - `ml/constants.py`
 
 Test vectors (5 HMAC, 12 status, 8 exposure) are computed by `node tools/gen_vectors.js` into [`contracts/test_vectors.json`](contracts/test_vectors.json). Never edit generated files by hand. See [docs/CONTRACTS.md](docs/CONTRACTS.md) for status logic, the signed envelope, message bodies, the API surface, the permission matrix and the pin map.

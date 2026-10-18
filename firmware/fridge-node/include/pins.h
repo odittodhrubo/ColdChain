@@ -4,9 +4,7 @@
 #pragma once
 #include <stdint.h>
 
-#if __has_include("config.h")
-#include "config.h"
-#endif
+#include "settings.h"
 
 namespace pins {
 constexpr uint8_t PIN_DS18B20 = 4;     // 1-Wire data, 4.7k pull-up to 3V3

@@ -19,10 +19,13 @@ bool drawnOnce = false;
 uint32_t lastDrawAt = 0;
 
 constexpr uint8_t DEGREE = 248;  // degree sign in the CP437 font
+constexpr uint8_t CHECK = 251;   // square-root sign, the closest CP437 glyph to a check mark
 
 bool discreteChanged(const DisplayData& a, const DisplayData& b) {
   return a.state != b.state || a.sensorFault != b.sensorFault || a.doorOpen != b.doorOpen || a.compOn != b.compOn ||
-         a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode;
+         a.onBattery != b.onBattery || a.battPct != b.battPct || a.manualMode != b.manualMode || a.wifi != b.wifi ||
+         a.mqtt != b.mqtt || a.netNote != b.netNote || a.latch != b.latch || a.atRisk != b.atRisk ||
+         a.budgetPct != b.budgetPct || a.doorAlarm != b.doorAlarm;
 }
 
 void draw(const DisplayData& d) {
@@ -34,34 +37,52 @@ void draw(const DisplayData& d) {
   oled.setTextColor(breach ? SSD1306_BLACK : SSD1306_WHITE);
   oled.setCursor(1, 1);
   oled.print(title);
+  oled.print(d.manualMode ? " MAN" : " SIM");
   const char* word = stateName(d.state);
   oled.setCursor(127 - 6 * strlen(word), 1);
   oled.print(word);
   oled.setTextColor(SSD1306_WHITE);
 
+  oled.setTextSize(2);
+  oled.setCursor(0, 13);
   if (d.sensorFault || isnan(d.temp)) {
-    oled.setTextSize(2);
-    oled.setCursor(0, 14);
-    oled.print("SENSOR");
-    oled.setCursor(0, 30);
-    oled.print("FAULT");
+    oled.print("--.-");
   } else {
-    oled.setTextSize(3);
-    oled.setCursor(0, 14);
     oled.printf("%.1f", d.temp);
-    oled.setTextSize(2);
-    oled.setCursor(oled.getCursorX() + 4, 14);
-    oled.write(DEGREE);
-    oled.print("C");
+  }
+  oled.setCursor(oled.getCursorX() + 2, 13);
+  oled.write(DEGREE);
+  oled.print("C");
+
+  // Status line, most urgent first.
+  oled.setTextSize(1);
+  oled.setCursor(0, 31);
+  if (d.sensorFault) {
+    oled.print("SENSOR FAULT");
+  } else if (d.doorAlarm) {
+    oled.print("DOOR OPEN!");
+  } else if (d.latch) {
+    oled.print("DISCARD - RESET REQ");
+  } else if (d.atRisk) {
+    oled.printf("AT RISK %u%%", d.budgetPct);
+  } else {
+    oled.printf("BUDGET %u%%", d.budgetPct);
   }
 
-  oled.setTextSize(1);
   oled.setCursor(0, 40);
   oled.printf("DOOR:%s COMP:%s", d.doorOpen ? "OPEN" : "CLOSED", d.compOn ? "ON" : "OFF");
   oled.setCursor(0, 48);
   oled.printf("PWR:%s BAT:%u%%", d.onBattery ? "BATTERY" : "MAINS", d.battPct);
   oled.setCursor(0, 56);
-  oled.print(d.manualMode ? "MODE:MANUAL DS18B20" : "MODE:THERMAL MODEL");
+  if (d.netNote) {
+    oled.print(d.netNote);
+  } else {
+    oled.print("WIFI");
+    oled.write(d.wifi ? CHECK : 'x');
+    oled.print(" MQTT");
+    oled.write(d.mqtt ? CHECK : 'x');
+    oled.printf(" SEQ %lu", static_cast<unsigned long>(d.seq));
+  }
   oled.display();
 }
 }  // namespace
@@ -79,6 +100,12 @@ bool begin(const char* fridge_id) {
   oled.clearDisplay();
   oled.display();
   return true;
+}
+
+void setPower(bool on) {
+  if (!ok) return;
+  oled.ssd1306_command(on ? SSD1306_DISPLAYON : SSD1306_DISPLAYOFF);
+  if (on) drawnOnce = false;  // redraw at the next update
 }
 
 void update(const DisplayData& d, uint32_t now_ms) {

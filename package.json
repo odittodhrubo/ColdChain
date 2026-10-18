@@ -13,7 +13,7 @@
     "test": "node tools/test_all.js",
     "lint": "npm --prefix backend run lint && npm --prefix frontend run lint && ruff check ml tools",
     "format": "npm --prefix backend run format && npm --prefix frontend run format && ruff format ml tools",
-    "up": "docker compose -f infra/docker-compose.yml up -d --build",
+    "up": "docker compose -f infra/docker-compose.yml up -d --build --renew-anon-volumes",
     "down": "docker compose -f infra/docker-compose.yml down",
     "seed": "npm --prefix backend run seed",
     "demo": "npm --prefix backend run demo"

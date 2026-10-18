@@ -24,7 +24,7 @@ check:            ## fail if generated files are stale
 	$(PY) tools/gen_wokwi.py --check
 
 up:
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --build --renew-anon-volumes
 
 down:
 	$(COMPOSE) down

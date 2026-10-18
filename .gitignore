@@ -40,3 +40,15 @@ ml/.cache/
 .DS_Store
 Thumbs.db
 .idea/
+
+# virtual node state (persisted seq per simulated device)
+tools/.state/
+
+# impeccable design workflow: review captures and decision-page logs are local evidence, not source
+.impeccable/review/
+.impeccable/questions/
+.impeccable/mocks/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/

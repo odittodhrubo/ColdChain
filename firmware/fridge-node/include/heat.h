@@ -1,0 +1,42 @@
+// Fridge-level heat-exposure budget and DISCARD latch (contract section 2; device half of Task 2).
+// The server tracks budgets per batch and is the source of truth for batch status. The device keeps the worst
+// case for the whole fridge, so the red latch works even with no server contact.
+// Pure: persistence goes through Kv (NVS on the ESP32, a fake in tests).
+#pragma once
+#include <stdint.h>
+
+#include "kv.h"
+
+// Weighted seconds per real second at temp: 0 up to 8.0 C, 1 above 8.0 up to 12.0, 2 above 12.0.
+uint8_t exposureWeight(float temp);
+
+class HeatKeeper {
+ public:
+  static constexpr uint32_t SAVE_EVERY_MS = 30000;  // NVS wear: exp_s at most every 30 s (plus on state change)
+
+  explicit HeatKeeper(Kv& kv) : kv_(kv) {}
+
+  void begin();  // restore exp_s and the latch from NVS: a reboot or power cut never clears them
+
+  // Accrue dt_s seconds at temp. On a sensor fault the temperature is unknown, so it counts as weight 1
+  // (fail-safe: never under-count). Returns true when this call set the latch (budget exhausted).
+  bool update(float temp, bool sensor_fault, float dt_s, uint32_t now_ms);
+
+  bool setLatch();    // SET_LATCH command; true if it was not latched before
+  bool resetLatch();  // verified RESET_LATCH: clears the latch and zeroes exp_s; true if it was latched
+
+  uint32_t expS() const { return static_cast<uint32_t>(weighted_); }
+  float remainingPct() const;
+  bool latched() const { return latched_; }
+  bool atRisk() const;  // remaining below AT_RISK_PCT (and not already DISCARD)
+
+ private:
+  void save(uint32_t now_ms);
+
+  Kv& kv_;
+  double weighted_ = 0;  // fractional seconds, so 1 Hz sampling with jittery dt loses nothing
+  bool latched_ = false;
+  bool accruing_ = false;
+  uint32_t savedExp_ = 0;
+  uint32_t savedAt_ = 0;
+};
