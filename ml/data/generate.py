@@ -13,7 +13,7 @@ uses, and are stored as 1-minute rows:
 
 efficiency_true and ambient_true are simulator truth: labels only, never features.
 
-    python -m data.generate                    # 8 profiles x 60 days -> ml/data/raw/*.csv.gz, card, stats
+    python -m data.generate                    # 10 profiles x 60 days -> ml/data/raw/*.csv.gz, card, stats
     python -m data.generate --days 3 --out /tmp/x --no-card
 """
 
@@ -69,6 +69,9 @@ PROFILES: tuple[Profile, ...] = (
     Profile("health-post", 36, 0.00045, 0.0012, 2.4, 0.10, 1.0, degrades=True),
     Profile("hospital-ward", 24, 0.00025, 0.0018, 3.5, 0.04, 1.8),
     Profile("outreach-hub", 32, 0.00038, 0.0016, 2.8, 0.06, 1.3, degrades=True, faults=1),
+    # the fridge the firmware and the virtual node simulate (node_config.h defaults): little cooling headroom
+    Profile("firmware-nominal", 30, 0.0004, 0.004, 0.02 / (0.0004 * 27), 0.03, 1.2, degrades=True, faults=1),
+    Profile("village-post", 31, 0.00042, 0.003, 2.0, 0.05, 1.3, degrades=True),
     Profile("mobile-unit", 29, 0.00042, 0.0014, 2.7, 0.07, 1.4, degrades=True, faults=1, held_out=True),
     Profile("city-depot", 27, 0.00028, 0.0010, 3.3, 0.05, 1.1, faults=1, held_out=True),
 )  # fmt: skip

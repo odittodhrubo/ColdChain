@@ -74,6 +74,8 @@ def test_health_band_weakening_trend():
     ts = np.arange(25) * 3600
     assert trend_per_day(ts, 90 - ts / 86400 * 7) == pytest.approx(-7)
     assert math.isnan(trend_per_day(ts[:2], [1, 2]))
+    minutes = np.arange(10) * 60  # ten minutes of jitter is not a trend
+    assert math.isnan(trend_per_day(minutes, [90, 89, 91, 88, 90, 89, 87, 90, 88, 89]))
 
 
 class _Const:

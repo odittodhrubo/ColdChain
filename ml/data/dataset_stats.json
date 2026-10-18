@@ -25,7 +25,7 @@
       "faults": 0,
       "missing_segments": 3,
       "minutes_above_8": 1283,
-      "seconds": 8.3
+      "seconds": 16.2
     },
     {
       "profile": {
@@ -50,7 +50,7 @@
       "faults": 1,
       "missing_segments": 3,
       "minutes_above_8": 3525,
-      "seconds": 8.5
+      "seconds": 17.0
     },
     {
       "profile": {
@@ -75,7 +75,7 @@
       "faults": 1,
       "missing_segments": 3,
       "minutes_above_8": 2375,
-      "seconds": 8.4
+      "seconds": 17.5
     },
     {
       "profile": {
@@ -100,7 +100,7 @@
       "faults": 0,
       "missing_segments": 3,
       "minutes_above_8": 4225,
-      "seconds": 8.4
+      "seconds": 19.2
     },
     {
       "profile": {
@@ -125,7 +125,7 @@
       "faults": 0,
       "missing_segments": 3,
       "minutes_above_8": 1360,
-      "seconds": 8.2
+      "seconds": 18.9
     },
     {
       "profile": {
@@ -150,7 +150,57 @@
       "faults": 1,
       "missing_segments": 3,
       "minutes_above_8": 3308,
-      "seconds": 8.5
+      "seconds": 17.3
+    },
+    {
+      "profile": {
+        "name": "firmware-nominal",
+        "ambient_c": 30,
+        "leak": 0.0004,
+        "k_door": 0.004,
+        "margin": 1.8518518518518519,
+        "noise": 0.03,
+        "door_per_hour": 1.2,
+        "degrades": true,
+        "faults": 1,
+        "held_out": false,
+        "cool_rate": 0.02
+      },
+      "rows": 86209,
+      "days": 60,
+      "door_events": 921,
+      "ajar_events": 19,
+      "power_failures": 14,
+      "degradation_arcs": 3,
+      "faults": 1,
+      "missing_segments": 3,
+      "minutes_above_8": 12336,
+      "seconds": 16.8
+    },
+    {
+      "profile": {
+        "name": "village-post",
+        "ambient_c": 31,
+        "leak": 0.00042,
+        "k_door": 0.003,
+        "margin": 2.0,
+        "noise": 0.05,
+        "door_per_hour": 1.3,
+        "degrades": true,
+        "faults": 0,
+        "held_out": false,
+        "cool_rate": 0.02352
+      },
+      "rows": 86256,
+      "days": 60,
+      "door_events": 1012,
+      "ajar_events": 27,
+      "power_failures": 18,
+      "degradation_arcs": 4,
+      "faults": 0,
+      "missing_segments": 3,
+      "minutes_above_8": 9007,
+      "seconds": 18.4
     },
     {
       "profile": {
@@ -175,7 +225,7 @@
       "faults": 1,
       "missing_segments": 3,
       "minutes_above_8": 3266,
-      "seconds": 8.4
+      "seconds": 18.4
     },
     {
       "profile": {
@@ -200,39 +250,39 @@
       "faults": 1,
       "missing_segments": 3,
       "minutes_above_8": 1489,
-      "seconds": 8.3
+      "seconds": 19.0
     }
   ],
-  "raw_rows": 689595,
-  "minutes_above_8_pct": 3.02,
-  "forecast_rows": 137822,
-  "health_rows": 11440,
+  "raw_rows": 862060,
+  "minutes_above_8_pct": 4.89,
+  "forecast_rows": 172290,
+  "health_rows": 14304,
   "features": 42,
   "health_features": 15,
   "by_split": {
     "gap": {
-      "forecast_rows": 216,
+      "forecast_rows": 288,
       "breach_rows": 0,
       "breach_rate": 0.0,
-      "health_rows": 287
+      "health_rows": 383
     },
     "test": {
-      "forecast_rows": 51669,
-      "breach_rows": 3200,
-      "breach_rate": 0.062,
-      "health_rows": 4155
+      "forecast_rows": 57389,
+      "breach_rows": 4301,
+      "breach_rate": 0.0751,
+      "health_rows": 4586
     },
     "train": {
-      "forecast_rows": 68823,
-      "breach_rows": 5314,
-      "breach_rate": 0.0773,
-      "health_rows": 5706
+      "forecast_rows": 91786,
+      "breach_rows": 10208,
+      "breach_rate": 0.1113,
+      "health_rows": 7612
     },
     "val": {
-      "forecast_rows": 17114,
-      "breach_rows": 1102,
-      "breach_rate": 0.0645,
-      "health_rows": 1292
+      "forecast_rows": 22827,
+      "breach_rows": 2694,
+      "breach_rate": 0.1181,
+      "health_rows": 1723
     }
   },
   "held_out_profiles": [

@@ -12,6 +12,8 @@ import type { Realtime } from '../realtime';
 import { can, type Permission, type Role } from '../rbac/permissions';
 import { forbidden, unauthenticated } from './errors';
 import type { BatchStatus } from './status';
+import type { MlEngine } from '../ml/engine';
+import type { RelocationEngine } from '../modules/relocation/service';
 
 // Route registry. Every route declares who may call it; there is no default, so a route cannot be added
 // without a permission decision (deny by default). The RBAC test iterates this registry.
@@ -43,6 +45,8 @@ export interface AppContext {
   heat: HeatEngine; // heat-exposure budget (P11)
   alerts: AlertEngine; // alerts and notifications (P12)
   commands: CommandTracker; // signed device commands tracked until cmdack (P12)
+  ml: MlEngine; // scheduled forecasts and health scores (P18)
+  relocation: RelocationEngine; // relocation plans, one-click confirm (P18)
   hooks: AppHooks;
 }
 

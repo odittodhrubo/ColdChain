@@ -50,7 +50,7 @@ seed:
 demo:
 	npm run demo
 
-data:             ## ML dataset: simulate 8 fridges x 60 days, build features, labels and DATASET_CARD.md
+data:             ## ML dataset: simulate 10 fridges x 60 days, build features, labels and DATASET_CARD.md
 	npm run ml:data
 
 train:            ## ML models, metrics, figures and reports/REPORT.md (builds the dataset first if missing)

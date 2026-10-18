@@ -1,5 +1,5 @@
 {
-  "trained_at": "2026-10-18T07:22:39Z",
+  "trained_at": "2026-10-18T08:07:08Z",
   "seed": 7,
   "versions": {
     "python": "3.14.6",
@@ -10,13 +10,13 @@
   "dataset": {
     "seed": 2026,
     "generated_at": "2026-10-18",
-    "raw_rows": 689595,
-    "forecast_rows": 137822,
-    "health_rows": 11440
+    "raw_rows": 862060,
+    "forecast_rows": 172290,
+    "health_rows": 14304
   },
   "forecast": {
     "model": "HistGradientBoostingRegressor: median (absolute error) + quantile p10/p90 conformalised on validation, horizon 30 min",
-    "interval_margin": 0.12252852611554284,
+    "interval_margin": 0.12035007363156353,
     "features": [
       "temp_now",
       "minutes_since_reading",
@@ -67,8 +67,8 @@
     },
     "warning_method": "classifier",
     "thresholds": {
-      "medium": 0.09577263529253352,
-      "high": 0.7142857142857143
+      "medium": 0.13114754098360654,
+      "high": 0.7692307692307693
     },
     "rule": "HIGH if pred > 8 or p90 > 9; MEDIUM if p90 > 8; LOW otherwise"
   },

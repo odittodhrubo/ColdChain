@@ -8,7 +8,7 @@ Everything ML lives in `ml/` and runs with the repo venv (`.venv/Scripts/python`
 cd ml && ../.venv/Scripts/python -m data.generate     # or: npm run ml:data / make data  (~2 min)
 ```
 
-- `data/generate.py` simulates 8 fridge profiles × 60 days at 5 s steps with the simulator's own physics (`tools/coldchain_tools/sim_engine.py`: `ThermalModel` with per-profile parameters, `CompressorControl`, `PowerModel`). The events are door openings that follow the working day, power failures of 5–90 min, gradual compressor degradation arcs, sudden faults, a drifting ambient, sensor noise and missing segments. Everything is seeded, so the same command gives the same rows.
+- `data/generate.py` simulates 10 fridge profiles × 60 days (including the firmware's own nominal fridge) at 5 s steps with the simulator's own physics (`tools/coldchain_tools/sim_engine.py`: `ThermalModel` with per-profile parameters, `CompressorControl`, `PowerModel`). The events are door openings that follow the working day, power failures of 5–90 min, gradual compressor degradation arcs, sudden faults, a drifting ambient, sensor noise and missing segments. Everything is seeded, so the same command gives the same rows.
 - The 5 s readings become 1-minute rows through `features.to_minutes`, the function serving uses on live readings. They are stored in `data/raw/<profile>.csv.gz`, which is git-ignored and reproducible.
 - `data/dataset.py` adds the labels (`y_temp_5/10/20/30`, `y_breach_30`, `y_health`), the splits and the model matrices `data/processed/{forecast,health}.csv.gz`. `python -m data.dataset` rebuilds only this step.
 - [`ml/data/DATASET_CARD.md`](../ml/data/DATASET_CARD.md) and `data/dataset_stats.json` are rendered from the generated data: method, parameters, counts, class balance, limitations.
@@ -78,3 +78,30 @@ Outputs: `ml/models/{forecast,health}.joblib` and `model_card.json`; `ml/reports
   - a **door-left-ajar replay** on a held-out fridge warns at least 10 minutes before the temperature passes 8 °C.
 
 The trained bundles are committed (about 16 MB), so the service starts without training. Loading a bundle needs the scikit-learn version recorded in `model_card.json`.
+
+## Prediction service (P18)
+
+`ml/app/main.py` (FastAPI). Run it with `cd ml && ../.venv/Scripts/uvicorn app.main:app --port 8000`; in Docker it is the `ml` service. The backend is its only client. It sends no CORS headers, and compose binds it to localhost.
+
+- **Models:** loaded once at start-up from `ml/models`. If they are missing, `/health` says `degraded` and why, and `/predict` answers 503.
+- **`POST /predict`:**
+  - Request: `{fridge_id, readings, history_24h?, health_history?}`. `readings` holds the last 60 min (raw or 1-minute rows: `ts, temp, door, comp, power, batt`); fewer than 20 with a temperature answers `{"status": "insufficient_data"}`. `history_24h` holds the last 24 h for compressor health. `health_history` is `[{ts, score}]` for the trend.
+  - Validation is strict: unknown fields, impossible values and oversized arrays get 422.
+  - Response: `{pred_temp_30, p10, p90, breach_level, breach_prob, minutes_to_breach_estimate, health_score, health_band, health_method, health_trend_per_day, weakening, features_used, health_factors, model_version, elapsed_ms}`.
+  - `features_used` and `health_factors` are the inputs behind the answer, so the UI can say *why*.
+  - `minutes_to_breach_estimate` is the straight-line time to 8 °C along the forecast (or p90) path.
+  - The trend needs at least 6 h of scores; with less, minutes of jitter would read as a collapse.
+- **`GET /report`** and **`GET /report/figures/{name}`**: `metrics.json`, `REPORT.md`, the model card and the figures, served to the backend (`/api/ml/report`). Figure names are whitelisted.
+- **Speed:** about 80 ms per prediction on a laptop. The backend gives it 1 s, then falls back to its rule.
+
+`requirements.txt` pins the versions the models were trained with. The image uses Python 3.14 like the venv.
+
+Tests (`ml/tests/test_service.py`) run on simulator scenarios (the firmware's physics):
+- a normal fridge is LOW risk and healthy;
+- `weak_compressor` scores below 70 and is flagged weakening;
+- an open door reaches HIGH within a minute;
+- insufficient data and validation are handled;
+- there are no CORS headers;
+- the report endpoints work.
+
+The dataset includes the firmware's own nominal fridge (`firmware-nominal`), so a healthy virtual node scores GOOD.

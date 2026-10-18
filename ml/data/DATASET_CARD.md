@@ -6,8 +6,8 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 
 ## What it is
 
-8 simulated vaccine fridges × 60 days, sampled every 5 s and stored as 1-minute rows
-(689,595 rows). Temperature is above 8 °C in 3.02 % of minutes.
+10 simulated vaccine fridges × 60 days, sampled every 5 s and stored as 1-minute rows
+(862,060 rows). Temperature is above 8 °C in 4.89 % of minutes.
 
 ## How it was made
 
@@ -20,14 +20,14 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
   that no feature sees directly.
 - **Events** (decided up front from the seed, then simulated):
   - door openings follow the working day (08–20 UTC; a tenth of the rate at night); 85 % last 5–60 s and
-    15 % last 1–5 min (8,821 in total);
+    15 % last 1–5 min (10,754 in total);
   - the door left ajar for 20–90 min in working hours, about three a week: the switch reads open but
     the compressor almost keeps up, so the temperature creeps up over many minutes (or holds)
-    (201 in total);
-  - power failures of 5–90 min, about one every 4 days (114 in total);
+    (247 in total);
+  - power failures of 5–90 min, about one every 4 days (146 in total);
   - gradual compressor degradation arcs, efficiency 1.0 → 0.30–0.45 over 8–13 days and then a repair
-    (15 arcs, at least 3 per degrading profile over 60 days);
-  - sudden compressor faults, efficiency 0.15–0.35 for 3–24 h (5 in total);
+    (22 arcs, at least 3 per degrading profile over 60 days);
+  - sudden compressor faults, efficiency 0.15–0.35 for 3–24 h (6 in total);
   - missing segments of 10–90 min where rows are dropped, on top of the silence while a node's battery is
     dead.
 - **Storage:** `ml/data/raw/<profile>.csv.gz` with `fridge_profile, ts, temp, door, comp, power, batt,
@@ -44,6 +44,8 @@ comes from `dataset_stats.json`; regenerate instead of editing.*
 | health-post | 36 | 0.00045 | 0.0012 | 0.03564 | 0.1 | 1.0 | yes | 0 | no | 86,064 | 739 | 15 | 4 | 3 |
 | hospital-ward | 24 | 0.00025 | 0.0018 | 0.018375 | 0.04 | 1.8 | no | 0 | no | 86,211 | 1,399 | 15 | 0 | 3 |
 | outreach-hub | 32 | 0.00038 | 0.0016 | 0.030856 | 0.06 | 1.3 | yes | 1 | no | 86,071 | 1,014 | 16 | 4 | 3 |
+| firmware-nominal | 30 | 0.0004 | 0.004 | 0.02 | 0.03 | 1.2 | yes | 1 | no | 86,209 | 921 | 14 | 3 | 3 |
+| village-post | 31 | 0.00042 | 0.003 | 0.02352 | 0.05 | 1.3 | yes | 0 | no | 86,256 | 1,012 | 18 | 4 | 3 |
 | mobile-unit | 29 | 0.00042 | 0.0014 | 0.029484 | 0.07 | 1.4 | yes | 1 | yes | 86,317 | 1,100 | 12 | 3 | 3 |
 | city-depot | 27 | 0.00028 | 0.001 | 0.022176 | 0.05 | 1.1 | no | 1 | yes | 86,259 | 835 | 13 | 0 | 3 |
 
@@ -83,10 +85,10 @@ must not reach back into training labels (30 + 60 min for forecasts, 24 h for he
 
 | Split | Forecast rows | Breach rows | Breach rate (natural) | Health rows |
 |---|---|---|---|---|
-| train | 68,823 | 5,314 | 7.7 % | 5,706 |
-| val | 17,114 | 1,102 | 6.5 % | 1,292 |
-| test | 51,669 | 3,200 | 6.2 % | 4,155 |
-| gap | 216 | 0 | 0.0 % | 287 |
+| train | 91,786 | 10,208 | 11.1 % | 7,612 |
+| val | 22,827 | 2,694 | 11.8 % | 1,723 |
+| test | 57,389 | 4,301 | 7.5 % | 4,586 |
+| gap | 288 | 0 | 0.0 % | 383 |
 
 Breaches are rare. Evaluation keeps the natural ratio; any rebalancing happens in training only.
 

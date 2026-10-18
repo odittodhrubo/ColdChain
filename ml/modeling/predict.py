@@ -83,11 +83,15 @@ def weakening(score: float, trend_per_day: float | None) -> bool:
     )
 
 
-def trend_per_day(ts_s, scores) -> float:
-    """Least-squares slope of recent scores, in points per day (NaN with fewer than 3 points)."""
+MIN_TREND_SPAN_S = 6 * 3600
+
+
+def trend_per_day(ts_s, scores, min_span_s: float = MIN_TREND_SPAN_S) -> float:
+    """Least-squares slope of recent scores, in points per day. NaN with fewer than 3 points or less than 6 h
+    between the first and the last: minutes of jitter extrapolated to a day would read as a collapse."""
     ts, y = np.asarray(ts_s, float), np.asarray(scores, float)
     ok = ~np.isnan(y)
-    if ok.sum() < 3:
+    if ok.sum() < 3 or np.ptp(ts[ok]) < min_span_s:
         return math.nan
     ts, y = ts[ok] / 86400.0, y[ok]
     tm = ts - ts.mean()
