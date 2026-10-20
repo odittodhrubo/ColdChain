@@ -172,9 +172,7 @@ def pin_xy(p: dict, pin: str) -> tuple[float, float, str]:
 # ---------------------------------------------------------------- the circuit (same for every project)
 def read_pins() -> dict[str, int]:
     text = PINS_H.read_text(encoding="utf-8")
-    pins = {
-        m[1]: int(m[2]) for m in re.finditer(r"constexpr\s+uint8_t\s+PIN_(\w+)\s*=\s*(\d+);", text)
-    }
+    pins = {m[1]: int(m[2]) for m in re.finditer(r"constexpr\s+uint8_t\s+PIN_(\w+)\s*=\s*(\d+);", text)}
     if not pins:
         raise SystemExit(f"no PIN_ constants found in {PINS_H}")
     return pins
