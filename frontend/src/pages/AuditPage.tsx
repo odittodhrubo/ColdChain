@@ -116,10 +116,16 @@ export function AuditPage() {
     try {
       const result = await verifyStream((checked, total) => setVerify({ state: 'running', checked, total }));
       setVerify({ state: 'done', result });
+      const refetched = await list.refetch();
       if (!result.valid && result.firstBrokenId && !type && !actor) {
-        setPage(Math.max(1, Math.floor((result.headId - result.firstBrokenId) / PAGE) + 1)); // jump to the broken row
+        const headId =
+          refetched.data?.entries[0]?.id ??
+          refetched.data?.total ??
+          list.data?.entries[0]?.id ??
+          list.data?.total ??
+          result.firstBrokenId;
+        setPage(Math.max(1, Math.floor((headId - result.firstBrokenId) / PAGE) + 1)); // jump to the broken row
       }
-      void list.refetch();
     } catch (error) {
       setVerify({ state: 'error', error });
     }

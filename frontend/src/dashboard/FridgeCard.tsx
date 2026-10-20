@@ -70,7 +70,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
     <article
       aria-labelledby={`fridge-${fridge.id}`}
       className={`flex flex-col rounded-[var(--radius-label)] border bg-panel shadow-[0_1px_2px_rgb(15_27_42/0.05)] transition-[filter,opacity] duration-300 ${
-        stale !== null || !live ? 'opacity-80 grayscale' : ''
+        stale !== null || !live ? 'grayscale' : ''
       }`}
       style={{ borderColor: status === 'BREACH' ? 'var(--breach)' : 'var(--rule)' }}
     >
@@ -170,7 +170,8 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
             </span>
           ) : (
             <span className="flex items-center gap-1.5">
-              {t('fridge.mains')} <BatteryCharging aria-hidden className="size-3.5 text-ink-3" /> {live.batt} %
+              {t('fridge.mains')} <BatteryCharging aria-hidden className="size-3.5 text-ink-3" /> {live.batt}{' '}
+              %
             </span>
           )}
         </Row>

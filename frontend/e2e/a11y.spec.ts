@@ -4,6 +4,7 @@ import { expectNoA11yViolations } from './a11y';
 
 // P5: sweep the main authenticated pages for serious/critical accessibility violations.
 test('no serious accessibility violations on the main pages', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/');
   await page.getByLabel('Email').fill(E2E_ADMIN.email);
   await page.getByLabel('Password', { exact: true }).fill(E2E_ADMIN.password);

@@ -78,15 +78,14 @@ test('inspector sees no add or move buttons, and the API refuses the write too',
 });
 
 test('Verify Integrity is green, then red at the record edited in the database', async ({ page }) => {
-  const python = path.resolve('../.venv/Scripts/python.exe');
+  const root = path.resolve(import.meta.dirname, '../..');
+  const python =
+    [path.join(root, '.venv/Scripts/python.exe'), path.join(root, '.venv/bin/python')].find(existsSync) ??
+    'python';
   const tamper = (...args: string[]) =>
-    execFileSync(
-      existsSync(python) ? python : 'python',
-      ['-m', 'coldchain_tools.tamper', '--db', E2E_DB!, ...args],
-      {
-        cwd: path.resolve('../tools'),
-      },
-    );
+    execFileSync(python, ['-m', 'coldchain_tools.tamper', '--db', E2E_DB!, ...args], {
+      cwd: path.join(root, 'tools'),
+    });
 
   await signIn(page, E2E_ADMIN);
   await page.goto('/audit');
