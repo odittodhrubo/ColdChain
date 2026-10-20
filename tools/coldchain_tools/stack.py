@@ -198,7 +198,8 @@ class Stack:
                 "ML_URL": self.ml_url,
                 "ML_INTERVAL_MS": str(self.ml_interval_ms),
                 "DEMO_TIME_SCALE": str(self.demo_scale),
-                "SIM_CONTROLS": "true",  # the demo web app can drive the virtual nodes (door, temp, power, Wi-Fi)
+                # the demo web app can drive the virtual nodes (door, temp, power, Wi-Fi)
+                "SIM_CONTROLS": "true",
                 "SEED_ADMIN_PASSWORD": self.passwords["ADMIN"],
                 "SEED_PHARMACIST_PASSWORD": self.passwords["PHARMACIST"],
                 "SEED_INSPECTOR_PASSWORD": self.passwords["INSPECTOR"],
