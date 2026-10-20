@@ -204,6 +204,8 @@ class MqttTransport:
         self.client.will_set(status_topic, "offline", qos=1, retain=True)
         self.client.reconnect_delay_set(1, 30)
 
+        self.status_topic = status_topic
+
         def on_connect(client, _userdata, _flags, reason_code, _props):
             if reason_code == 0:
                 client.publish(status_topic, "online", qos=1, retain=True)
@@ -229,13 +231,12 @@ class MqttTransport:
         return self.client.publish(topic_, payload, qos=0).rc == self._mqtt.MQTT_ERR_SUCCESS
 
     def set_outage(self, on: bool) -> None:
-        # An explicit disconnect() ends paho's network thread, so restoring needs a fresh connect + loop.
-        if on:
-            self.client.disconnect()
-            self.client.loop_stop()
-        else:
-            self.client.connect_async(self._host, self._port, keepalive=15)
-            self.client.loop_start()
+        # Publish offline/online status to the broker so backend/UI track link status immediately.
+        # We keep the MQTT client connected so the virtual node can receive the demo 'restore'
+        # command over its subscribed sim topic. Uplink layer simulates the outage by buffering
+        # telemetry/events into RingBuffer and triggering WIFI_LOST / WIFI_BACK.
+        status = "offline" if on else "online"
+        self.client.publish(self.status_topic, status, qos=1, retain=True)
 
     def close(self) -> None:
         self.client.loop_stop()
