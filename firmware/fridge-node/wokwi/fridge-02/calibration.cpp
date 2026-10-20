@@ -6,7 +6,7 @@
 #include "constants.h"
 
 namespace {
-const char* KEY = "cal_mc";          // offset in milli-Â°C, stored as a signed int32 in a u32 slot
+const char* KEY = "cal_mc";          // offset in milli-°C, stored as a signed int32 in a u32 slot
 const uint32_t UNSET = 0x7fffffffu;  // sentinel: never calibrated
 }  // namespace
 
