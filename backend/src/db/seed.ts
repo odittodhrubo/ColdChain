@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Config } from '../config';
-import { createUser } from '../modules/users/service';
+import { createUser, requirePasswordChange } from '../modules/users/service';
 import type { Role } from '../rbac/permissions';
 import { decryptSecret, encryptSecret } from '../shared/secretbox';
 import type { Db } from './index';
@@ -48,8 +48,16 @@ export async function seed(
       result.users.push({ email: u.email, role: u.role });
       continue;
     }
-    const password = env[u.env] || randomPassword();
-    await createUser(db, { email: u.email, name: u.name, role: u.role, password }, config.BCRYPT_COST);
+    const given = env[u.env];
+    const password = given || randomPassword();
+    const created = await createUser(
+      db,
+      { email: u.email, name: u.name, role: u.role, password },
+      config.BCRYPT_COST,
+    );
+    // a generated password is printed once on a console: it must be replaced at first sign-in (S2). One given
+    // through SEED_*_PASSWORD (make demo, the e2e and scenario stacks) was chosen on purpose and stays.
+    if (!given) requirePasswordChange(db, created.id);
     result.users.push({ email: u.email, role: u.role, password });
   }
 
@@ -70,7 +78,8 @@ export async function seed(
     const secret = /^[0-9a-f]{64}$/i.test(fromEnv ?? '') ? fromEnv! : randomBytes(32).toString('hex');
     db.prepare(
       `INSERT INTO devices (device_id, fridge_id, secret_enc, active, created_at) VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(device_id) DO UPDATE SET secret_enc = excluded.secret_enc, fridge_id = excluded.fridge_id`,
+       ON CONFLICT(device_id) DO UPDATE SET secret_enc = excluded.secret_enc, fridge_id = excluded.fridge_id,
+         pending_secret_enc = NULL`, // re-provisioning (S7 recovery) cancels a rotation that never completed
     ).run(f.device, f.id, encryptSecret(secret, config.APP_SECRET_KEY), now);
     result.devices.push({ deviceId: f.device, secret, source: secret === fromEnv ? 'env' : 'generated' });
   }

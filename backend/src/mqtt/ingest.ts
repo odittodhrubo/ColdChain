@@ -105,6 +105,10 @@ const DEVICE_EVENT_AUDIT = new Set([
   'LATCH_RESET',
   'SENSOR_FAULT',
 ]);
+// BOOT data.reset (firmware R6): a watchdog, panic or brownout reset is evidence worth keeping; a power-on is not.
+const ABNORMAL_RESETS = new Set(['TASK_WDT', 'INT_WDT', 'WDT', 'PANIC', 'BROWNOUT']);
+const audited = (e: { type: string; data: Record<string, unknown> }) =>
+  DEVICE_EVENT_AUDIT.has(e.type) || (e.type === 'BOOT' && ABNORMAL_RESETS.has(String(e.data.reset)));
 
 export class Ingestor {
   readonly devices: DeviceRegistry;
@@ -139,8 +143,8 @@ export class Ingestor {
         'INSERT INTO security_events (ts, device_id, reason, topic, size, sample_hash, detail) VALUES (?, ?, ?, ?, ?, ?, ?)',
       ),
       reading: db.prepare(
-        `INSERT INTO readings (device_id, fridge_id, seq, ts, temp, door, comp, power, batt, state, exp_s, latch, mode, reason, late, received_at)
-         VALUES (@device_id, @fridge_id, @seq, @ts, @temp, @door, @comp, @power, @batt, @state, @exp_s, @latch, @mode, @reason, @late, @received_at)
+        `INSERT INTO readings (device_id, fridge_id, seq, ts, temp, ambient, door, comp, power, batt, state, exp_s, latch, mode, reason, late, received_at)
+         VALUES (@device_id, @fridge_id, @seq, @ts, @temp, @ambient, @door, @comp, @power, @batt, @state, @exp_s, @latch, @mode, @reason, @late, @received_at)
          ON CONFLICT (device_id, seq) DO NOTHING`,
       ),
       event: db.prepare(
@@ -153,6 +157,13 @@ export class Ingestor {
         `SELECT seq FROM readings WHERE device_id = ? AND seq > ?
          UNION SELECT seq FROM events WHERE device_id = ? AND seq > ? ORDER BY seq LIMIT 500`,
       ),
+      // highest device seq already stored below a given one (seeded demo history has negative seqs)
+      storedBelow: db
+        .prepare(
+          `SELECT MAX(s) FROM (SELECT MAX(seq) AS s FROM readings WHERE device_id = ? AND seq > 0 AND seq < ?
+                               UNION ALL SELECT MAX(seq) FROM events WHERE device_id = ? AND seq > 0 AND seq < ?)`,
+        )
+        .pluck(),
       purge: db.prepare('DELETE FROM nonces WHERE expires_at < ?'),
       lastEvent: db
         .prepare('SELECT ts FROM events WHERE device_id = ? AND type = ? ORDER BY ts DESC, seq DESC LIMIT 1')
@@ -205,9 +216,14 @@ export class Ingestor {
     const skew = nowS - env.ts;
     if (Math.abs(skew) > this.window) return reject('STALE_TS', { skew_s: skew });
 
-    // 4. HMAC over the raw body string, constant-time compare
-    if (!sigEqual(sign(device.secret, env.device_id, env.kind, env.ts, env.nonce, env.body), env.sig))
-      return reject('BAD_SIG');
+    // 4. HMAC over the raw body string, constant-time compare. During a rotation (S7) a message signed with the
+    // pending secret is the device's proof that it switched: promote it, and the old secret is refused after.
+    const signedWith = (secret: string) =>
+      sigEqual(sign(secret, env.device_id, env.kind, env.ts, env.nonce, env.body), env.sig);
+    if (!signedWith(device.secret)) {
+      if (!device.pendingSecret || !signedWith(device.pendingSecret)) return reject('BAD_SIG');
+      this.promoteSecret(device.deviceId, nowMs);
+    }
 
     // 5. nonce, stored only now that the HMAC verified: unauthenticated senders cannot fill the table
     try {
@@ -392,6 +408,7 @@ export class Ingestor {
       seq,
       ts,
       temp,
+      ambient: r.ambient ?? null, // A3: null on nodes without the second sensor
       door,
       comp,
       power,
@@ -424,7 +441,15 @@ export class Ingestor {
   private eventSideEffects(e: StoredEvent) {
     if (e.type === 'LATCH_SET') this.sql.latch.run(1, e.fridge_id);
     if (e.type === 'LATCH_RESET') this.sql.latch.run(0, e.fridge_id); // the device confirms the admin reset
-    if (DEVICE_EVENT_AUDIT.has(e.type)) {
+    // The fridge's latch is the stored flag OR the last reading's: patch the cached reading too, or a client that
+    // refetches before the next telemetry (up to 5 s) still sees latch 1 and keeps the red banner. A late
+    // (synced) event older than the cached reading changes nothing there.
+    const live = this.live.get(e.fridge_id);
+    if (live && (e.type === 'LATCH_SET' || e.type === 'LATCH_RESET') && e.ts >= live.ts) {
+      live.latch = e.type === 'LATCH_SET' ? 1 : 0;
+      this.ctx.realtime.emit('fridge:update', live);
+    }
+    if (audited(e)) {
       this.ctx.audit.append(`device:${e.device_id}`, 'DEVICE_EVENT', {
         type: e.type,
         seq: e.seq,
@@ -494,6 +519,10 @@ export class Ingestor {
 
   private noteSeq(deviceId: string, seq: number, nowMs: number) {
     const tr = this.trackOf(deviceId);
+    // First message since this backend started: continue from what is stored (excluding this very message,
+    // already inserted), so a hole from while the backend was down is a gap too (R1).
+    if (tr.maxSeq === 0)
+      tr.maxSeq = (this.sql.storedBelow.get(deviceId, seq, deviceId, seq) as number | null) ?? 0;
     if (tr.maxSeq > 0 && seq > tr.maxSeq + 1 && !tr.gap)
       tr.gap = { from: tr.maxSeq + 1, to: seq - 1, since: nowMs };
     tr.maxSeq = Math.max(tr.maxSeq, seq);
@@ -511,10 +540,29 @@ export class Ingestor {
     }
   }
 
+  /** S7: the device signed with its pending secret, so it has switched: make that the secret, in one UPDATE. */
+  private promoteSecret(deviceId: string, nowMs: number) {
+    const changed = this.ctx.db
+      .prepare(
+        `UPDATE devices SET secret_enc = pending_secret_enc, pending_secret_enc = NULL, secret_rotated_at = ?
+         WHERE device_id = ? AND pending_secret_enc IS NOT NULL`,
+      )
+      .run(nowMs, deviceId).changes;
+    this.devices.invalidate(deviceId);
+    if (changed)
+      this.ctx.audit.append(`device:${deviceId}`, 'DEVICE_SECRET_ROTATED', {
+        device_id: deviceId,
+        phase: 'completed',
+      });
+  }
+
   private requestSync(deviceId: string) {
     const tr = this.trackOf(deviceId);
+    const gap = tr.gap;
     tr.gap = undefined;
-    if (this.sender.command(deviceId, 'SYNC_REQUEST')) {
+    // Name the hole: the node replays exactly that range from its live-sent window (R1).
+    const args = gap ? { from_seq: gap.from, to_seq: gap.to } : {};
+    if (this.sender.command(deviceId, 'SYNC_REQUEST', args)) {
       tr.syncRequests += 1;
       this.metrics.syncRequests += 1;
     }

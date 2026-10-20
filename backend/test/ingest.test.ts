@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../contracts/test_vectors.json';
 import { flushAuditFor } from './ingestHelpers';
-import { bearer, addUser, tokenFor } from './helpers';
-import { sign, type Envelope } from '../src/mqtt/envelope';
+import { bearer, addUser, makeApp, tokenFor } from './helpers';
+import { seed } from '../src/db/seed';
+import { createHmac } from 'node:crypto';
+import { rotateSeal, sign, type Envelope } from '../src/mqtt/envelope';
 import { envelope, NOW, nowS, reading, SECRET, setup, telemetry, topic } from './deviceHelpers';
 import { GAP_SYNC_AFTER_MS, OFFLINE_AFTER_MS, OFFLINE_ALERT_AFTER_MS } from '../src/mqtt/ingest';
 import { classify } from '../src/shared/status';
+import { createApp } from '../src/app';
+import type { AppContext } from '../src/shared/http';
 
 describe('envelope signing', () => {
   it('matches every shared HMAC vector', () => {
@@ -241,6 +245,28 @@ describe('events', () => {
     );
     expect(s.t.db.prepare("SELECT latch_state FROM fridges WHERE id = 'fridge-01'").pluck().get()).toBe(0);
   });
+
+  it('audit a BOOT after a watchdog, panic or brownout reset, not after a normal power-on', () => {
+    const s = setup();
+    const boot = (seq: number, reset: string) =>
+      s.ingest.handle(
+        topic('event'),
+        envelope('event', { seq, ts: nowS, type: 'BOOT', data: { fw: '1.0.0', reset } }),
+        NOW,
+      );
+    for (const [seq, reset] of [
+      [1, 'POWERON'],
+      [2, 'TASK_WDT'],
+      [3, 'SW'],
+      [4, 'BROWNOUT'],
+    ] as const)
+      expect(boot(seq, reset)).toMatchObject({ accepted: true, inserted: 1 });
+    const audited = s.t.db
+      .prepare("SELECT payload FROM audit_log WHERE event_type = 'DEVICE_EVENT'")
+      .pluck()
+      .all() as string[];
+    expect(audited.map((p) => JSON.parse(p).data.reset)).toEqual(['TASK_WDT', 'BROWNOUT']);
+  });
 });
 
 describe('sync', () => {
@@ -377,6 +403,38 @@ describe('gaps, offline watchdog, status hints', () => {
     expect(cmds(s.published)).toHaveLength(1); // once per gap
   });
 
+  it('SYNC_REQUEST names the gap, so the node replays exactly that range (R1)', () => {
+    const s = setup();
+    s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(10)), NOW);
+    s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(15)), NOW);
+    s.ingest.tick(NOW + GAP_SYNC_AFTER_MS);
+    const cmd = s.published.find((p) => p.topic === topic('cmd'))!;
+    const body = JSON.parse((JSON.parse(cmd.payload) as Envelope).body);
+    expect(body).toMatchObject({ type: 'SYNC_REQUEST', args: { from_seq: 11, to_seq: 14 } });
+  });
+
+  it('after a backend restart, a hole from while it was down is a gap too (R1)', () => {
+    const s = setup();
+    for (const q of [1, 2, 3]) s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(q)), NOW);
+    // a fresh backend process on the same database: nothing in memory, readings 1..3 on disk
+    const restarted = createApp(s.t.config, s.t.db).locals.ctx as AppContext;
+    const published: { topic: string; payload: string }[] = [];
+    restarted.ingest.setPublisher((t, p) => published.push({ topic: t, payload: p }));
+    restarted.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(9)), NOW + 1000);
+    restarted.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(10)), NOW + 6000);
+    restarted.ingest.tick(NOW + 1000 + GAP_SYNC_AFTER_MS);
+    expect(cmds(published)).toEqual(['SYNC_REQUEST']);
+    const body = JSON.parse((JSON.parse(published[0].payload) as Envelope).body);
+    expect(body.args).toEqual({ from_seq: 4, to_seq: 8 });
+    // and a restart with no hole asks for nothing
+    const again = createApp(s.t.config, s.t.db).locals.ctx as AppContext;
+    const quiet: { topic: string; payload: string }[] = [];
+    again.ingest.setPublisher((t, p) => quiet.push({ topic: t, payload: p }));
+    again.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(11)), NOW + 11_000);
+    again.ingest.tick(NOW + 11_000 + GAP_SYNC_AFTER_MS);
+    expect(cmds(quiet)).toEqual([]);
+  });
+
   it('a sync clears the gap; WIFI_BACK with an open gap asks at once', () => {
     const s = setup();
     s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(10)), NOW);
@@ -486,5 +544,100 @@ describe('security summary', () => {
       'fridge-01',
       'fridge-02',
     ]);
+  });
+});
+
+describe('device secret rotation (S7)', () => {
+  it('re-provisioning with a new secret in the env cancels a rotation that never completed', async () => {
+    const t = makeApp();
+    await seed(t.db, t.config, { DEVICE_SECRET_FRIDGE_01: 'c3'.repeat(32) });
+    t.db.prepare("UPDATE devices SET pending_secret_enc = 'x' WHERE device_id = 'fridge-01'").run();
+    await seed(t.db, t.config, { DEVICE_SECRET_FRIDGE_01: 'd4'.repeat(32) });
+    expect(
+      t.db.prepare("SELECT pending_secret_enc FROM devices WHERE device_id = 'fridge-01'").pluck().get(),
+    ).toBeNull();
+  });
+
+  /** What the device does with ROTATE_SECRET args: remove the pad (the tag is covered by the vector tests). */
+  const open = (old: string, a: { nonce: string; ct: string }) => {
+    const pad = createHmac('sha256', Buffer.from(old, 'utf8'))
+      .update(`coldchain-rotate-pad|${a.nonce}`)
+      .digest();
+    return Buffer.from(Buffer.from(a.ct, 'hex').map((b, i) => b ^ pad[i])).toString('hex');
+  };
+
+  it('seals like the shared vectors', () => {
+    for (const v of vectors.rotate)
+      expect(rotateSeal(v.old_secret, v.new_secret, v.nonce)).toEqual({
+        nonce: v.nonce,
+        ct: v.ct,
+        tag: v.tag,
+      });
+  });
+
+  it('old key until the device signs with the new one, then only the new one; never two pending', async () => {
+    const s = setup();
+    const admin = bearer(tokenFor(s.t, await addUser(s.t, 'ADMIN')));
+    const res = await s.t
+      .http()
+      .post('/api/devices/fridge-01/rotate-secret')
+      .set(admin)
+      .send({ reason: 'node serviced' });
+    expect(res.status).toBe(202);
+    const cmd = s.published.find((p) => p.topic === topic('cmd'))!;
+    const body = JSON.parse((JSON.parse(cmd.payload) as Envelope).body);
+    expect(body.type).toBe('ROTATE_SECRET');
+    expect(JSON.stringify(body)).not.toMatch(/"secret"/); // only the sealed form travels
+    const next = open(SECRET, body.args);
+    expect(next).toMatch(/^[0-9a-f]{64}$/);
+    expect(next).not.toBe(SECRET);
+
+    // before the device switches, the old key still works
+    expect(s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(1)), NOW)).toMatchObject({
+      accepted: true,
+    });
+    const again = await s.t
+      .http()
+      .post('/api/devices/fridge-01/rotate-secret')
+      .set(admin)
+      .send({ reason: 'twice' });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ROTATION_PENDING');
+
+    // the device's first message with the new key completes the rotation...
+    const viaNew = envelope(
+      'cmdack',
+      { cmd_id: body.cmd_id, ok: true, detail: 'secret rotated' },
+      { secret: next },
+    );
+    expect(s.ingest.handle(topic('cmdack'), viaNew, NOW)).toMatchObject({ accepted: true });
+    const row = s.t.db
+      .prepare("SELECT pending_secret_enc, secret_rotated_at FROM devices WHERE device_id = 'fridge-01'")
+      .get() as {
+      pending_secret_enc: string | null;
+      secret_rotated_at: number | null;
+    };
+    expect(row.pending_secret_enc).toBeNull();
+    expect(row.secret_rotated_at).toBe(NOW);
+    // ...and the old key is refused from now on
+    expect(s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(2)), NOW)).toMatchObject({
+      accepted: false,
+      reason: 'BAD_SIG',
+    });
+    expect(
+      s.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(3), { secret: next }), NOW),
+    ).toMatchObject({ accepted: true });
+    const phases = (
+      s.t.db
+        .prepare("SELECT payload FROM audit_log WHERE event_type = 'DEVICE_SECRET_ROTATED'")
+        .pluck()
+        .all() as string[]
+    ).map((p) => JSON.parse(p).phase);
+    expect(phases).toEqual(['requested', 'completed']);
+    // commands to the device are signed with the new key now
+    s.published.length = 0;
+    s.ctx.commands.send('fridge-01', 'BUZZER_TEST');
+    const buzz = JSON.parse(s.published.find((p) => p.topic === topic('cmd'))!.payload) as Envelope;
+    expect(buzz.sig).toBe(sign(next, buzz.device_id, 'cmd', buzz.ts, buzz.nonce, buzz.body));
   });
 });

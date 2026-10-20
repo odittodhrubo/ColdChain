@@ -1,8 +1,14 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ShieldAlert, ShieldCheck } from 'lucide-react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { KeyRound, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { PageHeader } from '../layout/AppShell';
-import { api } from '../lib/api';
+import { useAuth } from '../auth/AuthProvider';
+import { fmt, useT } from '../i18n';
+import { can } from '../auth/permissions';
+import { api, ApiError } from '../lib/api';
+import { Field } from '../ui/Field';
+import { Modal } from '../ui/Modal';
+import { useToast } from '../ui/Toast';
 import { ago, useServerNow } from '../lib/time';
 import { Button } from '../ui/Button';
 import { Panel } from '../ui/Panel';
@@ -10,14 +16,6 @@ import { Select } from '../ui/Select';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 
 const REASONS = ['BAD_JSON', 'UNKNOWN_DEVICE', 'STALE_TS', 'BAD_SIG', 'REPLAY', 'BAD_BODY'] as const;
-const REASON_TEXT: Record<string, string> = {
-  BAD_JSON: 'Malformed message',
-  UNKNOWN_DEVICE: 'Unknown or mismatched device',
-  STALE_TS: 'Timestamp outside the 30 s window',
-  BAD_SIG: 'HMAC signature does not verify',
-  REPLAY: 'Replayed nonce',
-  BAD_BODY: 'Body failed validation',
-};
 
 interface SecurityEvent {
   id: number;
@@ -40,6 +38,8 @@ interface Summary {
     last_seen_at: number | null;
     open_gap: { from: number; to: number } | null;
     clock_skew_s: number | null;
+    rotation_pending?: boolean; // S7: the new secret is sent, the device has not confirmed it yet
+    secret_rotated_at?: number | null;
   }[];
   server_time: number;
 }
@@ -61,7 +61,88 @@ export function burstIds(events: SecurityEvent[]): Set<number> {
   return out;
 }
 
+/** S7: the server makes a new secret (never shown), seals it under the current one and sends it to the node. */
+function RotateSecret({ deviceId, onClose }: { deviceId: string; onClose: () => void }) {
+  const { t } = useT();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [why, setWhy] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const rotate = useMutation({
+    mutationFn: () =>
+      api(`/api/devices/${encodeURIComponent(deviceId)}/rotate-secret`, {
+        method: 'POST',
+        body: { reason: why.trim() },
+      }),
+    onSuccess: () => {
+      toast({
+        tone: 'success',
+        title: fmt(t('rotate.sent'), { id: deviceId }),
+        body: t('rotate.sentBody'),
+      });
+      void qc.invalidateQueries({ queryKey: ['security', 'summary'] });
+      onClose();
+    },
+    onError: (e) =>
+      setError(
+        e instanceof ApiError && e.code === 'ROTATION_PENDING'
+          ? t('rotate.pending')
+          : e instanceof Error
+            ? e.message
+            : t('rotate.notStarted'),
+      ),
+  });
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={fmt(t('rotate.title'), { id: deviceId })}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={rotate.isPending}>
+            {t('rotate.cancel')}
+          </Button>
+          <Button
+            type="submit"
+            form="rotate-form"
+            variant="danger"
+            loading={rotate.isPending}
+            icon={<KeyRound aria-hidden className="size-4" />}
+          >
+            {t('rotate.rotate')}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="rotate-form"
+        noValidate
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (why.trim().length < 3) return setError(t('rotate.sayWhy'));
+          setError(null);
+          rotate.mutate();
+        }}
+      >
+        <p className="text-sm text-ink">{t('rotate.body')}</p>
+        <Field
+          label={t('rotate.reasonLabel')}
+          value={why}
+          onChange={(e) => setWhy(e.target.value)}
+          error={error}
+          autoComplete="off"
+        />
+      </form>
+    </Modal>
+  );
+}
+
 export function SecurityPage() {
+  const { t } = useT();
+  const { user } = useAuth();
+  const canRotate = can(user?.role, 'device:manage');
+  const [rotating, setRotating] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [device, setDevice] = useState('');
   const [page, setPage] = useState(1);
@@ -85,7 +166,7 @@ export function SecurityPage() {
 
   return (
     <>
-      <PageHeader title="Security" subtitle="Device messages the server refused, and why" />
+      <PageHeader title={t('page.security.title')} subtitle={t('page.security.subtitle')} />
       <section aria-label="Last hour" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {summary.isPending ? (
           [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)
@@ -96,14 +177,14 @@ export function SecurityPage() {
         ) : (
           <>
             <Panel bodyClassName="p-4">
-              <p className="text-xs font-semibold text-ink-3">Accepted, last hour</p>
+              <p className="text-xs font-semibold text-ink-3">{t('sec.accepted')}</p>
               <p className="figures mt-1 flex items-center gap-2 text-2xl font-bold text-safe">
                 <ShieldCheck aria-hidden className="size-5" />
                 {summary.data.accepted}
               </p>
             </Panel>
             <Panel bodyClassName="p-4">
-              <p className="text-xs font-semibold text-ink-3">Rejected, last hour</p>
+              <p className="text-xs font-semibold text-ink-3">{t('sec.rejected')}</p>
               <p
                 className="figures mt-1 flex items-center gap-2 text-2xl font-bold"
                 style={{ color: summary.data.rejected ? 'var(--breach)' : 'var(--ink-3)' }}
@@ -112,33 +193,56 @@ export function SecurityPage() {
                 {summary.data.rejected}
               </p>
               <p className="figures mt-1 text-xs text-ink-2">
-                {summary.data.by_reason.map((r) => `${r.reason} ${r.n}`).join(' · ') || 'none'}
+                {summary.data.by_reason.map((r) => `${r.reason} ${r.n}`).join(' · ') || t('sec.none')}
               </p>
             </Panel>
             <Panel bodyClassName="p-4" className="sm:col-span-2">
-              <p className="text-xs font-semibold text-ink-3">Devices</p>
+              <p className="text-xs font-semibold text-ink-3">{t('sec.devices')}</p>
               <ul className="mt-1 flex flex-col gap-1">
                 {summary.data.devices.map((d) => (
                   <li key={d.device_id} className="figures flex flex-wrap justify-between gap-2 text-sm">
                     <span className="font-semibold text-ink">
                       {d.device_id}
-                      {!d.active && <span className="ml-2 text-xs text-offline">inactive</span>}
+                      {!d.active && <span className="ml-2 text-xs text-offline">{t('sec.inactive')}</span>}
                     </span>
                     <span className="text-ink-2">
-                      {d.last_seen_at ? `last accepted ${ago((now - d.last_seen_at) / 1000)}` : 'never seen'}
+                      {d.last_seen_at
+                        ? fmt(t('sec.lastAccepted'), { t: ago((now - d.last_seen_at) / 1000, t) })
+                        : t('sec.neverSeen')}
                       {d.open_gap && (
                         <span className="ml-2 font-semibold text-warning">
-                          seq gap {d.open_gap.from}–{d.open_gap.to}
+                          {fmt(t('sec.seqGap'), { from: d.open_gap.from, to: d.open_gap.to })}
                         </span>
+                      )}
+                      {d.rotation_pending ? (
+                        <span className="ml-2 font-semibold text-warning">{t('sec.rotationPending')}</span>
+                      ) : (
+                        d.secret_rotated_at && (
+                          <span className="ml-2">
+                            {fmt(t('sec.secretRotated'), { t: ago((now - d.secret_rotated_at) / 1000, t) })}
+                          </span>
+                        )
                       )}
                       {d.clock_skew_s !== null && (
                         <span
                           className={`ml-2 ${Math.abs(d.clock_skew_s) > 10 ? 'font-semibold text-warning' : ''}`}
-                          title="Server receipt time minus the device's timestamp. Beyond ±30 s messages are refused as STALE_TS: check NTP on the device and this server."
+                          title={t('sec.clockSkewTitle')}
                         >
-                          clock skew {d.clock_skew_s > 0 ? '+' : ''}
-                          {d.clock_skew_s} s
+                          {fmt(t('sec.clockSkew'), {
+                            v: `${d.clock_skew_s > 0 ? '+' : ''}${d.clock_skew_s}`,
+                          })}
                         </span>
+                      )}
+                      {canRotate && d.active && !d.rotation_pending && (
+                        <Button
+                          variant="ghost"
+                          className="ml-2 min-h-8 px-2"
+                          icon={<KeyRound aria-hidden className="size-4" />}
+                          onClick={() => setRotating(d.device_id)}
+                          aria-label={fmt(t('sec.rotateAria'), { id: d.device_id })}
+                        >
+                          {t('sec.rotateSecret')}
+                        </Button>
                       )}
                     </span>
                   </li>
@@ -149,16 +253,16 @@ export function SecurityPage() {
         )}
       </section>
 
-      <Panel title="Rejected messages" bodyClassName="">
+      <Panel title={t('sec.rejectedTitle')} bodyClassName="">
         <div className="flex flex-wrap items-end gap-3 border-b border-rule p-4">
           <Select
-            label="Reason"
+            label={t('sec.reason')}
             hideLabel
             value={reason}
             onChange={(e) => (setReason(e.target.value), setPage(1))}
             className="w-56"
           >
-            <option value="">All reasons</option>
+            <option value="">{t('sec.allReasons')}</option>
             {REASONS.map((r) => (
               <option key={r} value={r}>
                 {r}
@@ -166,20 +270,20 @@ export function SecurityPage() {
             ))}
           </Select>
           <Select
-            label="Device"
+            label={t('sec.device')}
             hideLabel
             value={device}
             onChange={(e) => (setDevice(e.target.value), setPage(1))}
             className="w-44"
           >
-            <option value="">All devices</option>
+            <option value="">{t('sec.allDevices')}</option>
             {summary.data?.devices.map((d) => (
               <option key={d.device_id} value={d.device_id}>
                 {d.device_id}
               </option>
             ))}
           </Select>
-          <span className="ml-auto text-xs text-ink-3">Updates live as messages are refused</span>
+          <span className="ml-auto text-xs text-ink-3">{t('sec.liveNote')}</span>
         </div>
         {events.isPending ? (
           <div className="flex flex-col gap-2 p-4">
@@ -192,9 +296,8 @@ export function SecurityPage() {
             <ErrorState error={events.error} onRetry={() => void events.refetch()} />
           </div>
         ) : events.data.events.length === 0 ? (
-          <EmptyState icon={<ShieldCheck aria-hidden className="size-6" />} title="No rejected messages">
-            Forged, stale or replayed device messages show up here the moment the server refuses them. Try the
-            attack tool:{' '}
+          <EmptyState icon={<ShieldCheck aria-hidden className="size-6" />} title={t('sec.empty')}>
+            {t('sec.emptyBody')}{' '}
             <code className="rounded bg-panel-2 px-1 whitespace-nowrap">
               python -m coldchain_tools.attack replay --own
             </code>
@@ -206,7 +309,7 @@ export function SecurityPage() {
                 <caption className="sr-only">Rejected device messages</caption>
                 <thead className="bg-panel-2">
                   <tr>
-                    {['Time', 'Device', 'Reason', 'Topic', 'Size'].map((h) => (
+                    {[t('sec.colTime'), t('sec.colDevice'), t('sec.colReason'), t('sec.colTopic'), t('sec.colSize')].map((h) => (
                       <th
                         key={h}
                         scope="col"
@@ -228,17 +331,18 @@ export function SecurityPage() {
                         <td className="px-4 py-2.5 whitespace-nowrap text-ink">
                           {new Date(e.ts * 1000).toLocaleString()}
                         </td>
-                        <td className="px-4 py-2.5 text-ink">{e.device_id ?? 'unknown'}</td>
+                        <td className="px-4 py-2.5 text-ink">{e.device_id ?? t('sec.unknown')}</td>
                         <td className="px-4 py-2.5">
                           <span className="font-semibold text-breach">{e.reason}</span>
                           {burst && (
                             <span className="ml-2 rounded-full bg-breach px-2 py-0.5 text-xs font-bold text-on-breach">
-                              burst
+                              {t('sec.burst')}
                             </span>
                           )}
                           <span className="block text-xs text-ink-2">
-                            {REASON_TEXT[e.reason] ?? ''}
-                            {typeof e.detail?.skew_s === 'number' && ` · clock skew ${e.detail.skew_s} s`}
+                            {t(`sec.reason.${e.reason}` as 'sec.reason.BAD_SIG')}
+                            {typeof e.detail?.skew_s === 'number' &&
+                              ` · ${fmt(t('sec.skewDetail'), { v: e.detail.skew_s })}`}
                           </span>
                         </td>
                         <td
@@ -256,20 +360,21 @@ export function SecurityPage() {
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-rule px-4 py-3 text-sm text-ink-2">
               <span className="figures">
-                {events.data.total} rejected · page {page} of {pages}
+                {fmt(t('sec.total'), { total: events.data.total, page, pages })}
               </span>
               <span className="flex gap-2">
                 <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  Newer
+                  {t('sec.newer')}
                 </Button>
                 <Button variant="secondary" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-                  Older
+                  {t('sec.older')}
                 </Button>
               </span>
             </div>
           </>
         )}
       </Panel>
+      {rotating && <RotateSecret deviceId={rotating} onClose={() => setRotating(null)} />}
     </>
   );
 }

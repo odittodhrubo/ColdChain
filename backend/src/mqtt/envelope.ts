@@ -73,3 +73,19 @@ export function isEnvelope(x: unknown): x is Envelope {
     typeof e.sig === 'string'
   );
 }
+
+/**
+ * ROTATE_SECRET (S7): the new secret sealed under the current one, exactly as tools/gen_vectors.js rotateSeal and
+ * the firmware's crypto::rotateOpen. pad = HMAC(old, "coldchain-rotate-pad|" + nonce) is used once (fresh nonce),
+ * ct = hex(bytes(new) XOR pad), tag = HMAC(old, "coldchain-rotate-tag|" + nonce + "|" + ct). The command itself
+ * is also signed with the old secret, like every command.
+ */
+export function rotateSeal(oldSecret: string, newSecret: string, nonce = randomBytes(16).toString('hex')) {
+  const key = Buffer.from(oldSecret, 'utf8');
+  const pad = createHmac('sha256', key).update(`coldchain-rotate-pad|${nonce}`, 'utf8').digest();
+  const plain = Buffer.from(newSecret, 'hex');
+  if (plain.length !== 32) throw new Error('the new secret must be 64 hex characters');
+  const ct = Buffer.from(plain.map((b, i) => b ^ pad[i])).toString('hex');
+  const tag = createHmac('sha256', key).update(`coldchain-rotate-tag|${nonce}|${ct}`, 'utf8').digest('hex');
+  return { nonce, ct, tag };
+}

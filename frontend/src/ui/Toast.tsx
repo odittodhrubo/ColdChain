@@ -1,6 +1,6 @@
 import { CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 type Tone = 'info' | 'success' | 'error';
 interface ToastItem {

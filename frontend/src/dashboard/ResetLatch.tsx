@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { useT } from '../i18n';
 import { api, ApiError } from '../lib/api';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
@@ -10,7 +11,20 @@ import { useToast } from '../ui/Toast';
  * Admin acknowledges the discarded batches and clears the device's red latch. The server sends the signed
  * RESET_LATCH and waits for the node to confirm (up to 3 x 15 s), so this can take a while.
  */
-export function ResetLatchButton({ fridgeId, fridgeName }: { fridgeId: string; fridgeName: string }) {
+export function ResetLatchButton({
+  fridgeId,
+  fridgeName,
+  label,
+  variant = 'danger',
+  className,
+}: {
+  fridgeId: string;
+  fridgeName: string;
+  label?: string; // the inventory row says "Acknowledge disposal"; the fridge banner says "Reset"
+  variant?: 'danger' | 'secondary';
+  className?: string;
+}) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const qc = useQueryClient();
@@ -32,6 +46,7 @@ export function ResetLatchButton({ fridgeId, fridgeName }: { fridgeId: string; f
           : 'The node confirmed the reset.',
       });
       void qc.invalidateQueries({ queryKey: ['fridges'] });
+      void qc.invalidateQueries({ queryKey: ['fridge', fridgeId] });
       void qc.invalidateQueries({ queryKey: ['batches'] });
     },
   });
@@ -39,11 +54,12 @@ export function ResetLatchButton({ fridgeId, fridgeName }: { fridgeId: string; f
   return (
     <>
       <Button
-        variant="danger"
+        variant={variant}
+        className={className}
         icon={<RotateCcw aria-hidden className="size-4" />}
         onClick={() => setOpen(true)}
       >
-        Reset
+        {label ?? t('latch.reset')}
       </Button>
       <Modal
         open={open}

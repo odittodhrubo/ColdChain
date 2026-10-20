@@ -6,6 +6,7 @@ import type { AuditLog } from '../modules/audit/service';
 import type { BatchView } from '../modules/batches/service';
 import type { HeatEngine } from '../modules/exposure/engine';
 import type { AlertEngine } from '../modules/alerts/service';
+import type { PushSender } from '../modules/push/service';
 import type { CommandTracker } from '../mqtt/commands';
 import type { Ingestor } from '../mqtt/ingest';
 import type { Realtime } from '../realtime';
@@ -14,6 +15,8 @@ import { forbidden, unauthenticated } from './errors';
 import type { BatchStatus } from './status';
 import type { MlEngine } from '../ml/engine';
 import type { RelocationEngine } from '../modules/relocation/service';
+import type { ReportError } from './errorReport';
+import type { Metrics } from './metrics';
 
 // Route registry. Every route declares who may call it; there is no default, so a route cannot be added
 // without a permission decision (deny by default). The RBAC test iterates this registry.
@@ -27,6 +30,8 @@ export interface AuthUser {
   role: Role; // always re-read from the DB on each request, never trusted from the token alone
   jti: string;
   exp: number;
+  mustChangePassword?: boolean; // S2
+  totpEnabled?: boolean; // S3
 }
 
 declare module 'express-serve-static-core' {
@@ -48,6 +53,11 @@ export interface AppContext {
   ml: MlEngine; // scheduled forecasts and health scores (P18)
   relocation: RelocationEngine; // relocation plans, one-click confirm (P18)
   hooks: AppHooks;
+  mqttConnected?: () => boolean; // set by index.ts once the broker client starts; absent in tests
+  simPublish?: (topic: string, payload: string) => void; // raw MQTT publish for demo simulation controls
+  metrics: Metrics; // Prometheus (D3), served on METRICS_PORT only
+  reportError: ReportError; // error tracking (D4), a no-op without ERROR_DSN
+  push: PushSender; // Web Push for BREACH/DOOR alerts (P7), off without VAPID keys
 }
 
 /** Cross-module callbacks, wired in app.ts. The alert engine (P12) subscribes here. */

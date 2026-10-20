@@ -8,6 +8,8 @@
 // its own task (net.cpp), so a slow broker or Wi-Fi loss never stalls this loop.
 #include <Arduino.h>
 #include <ctype.h>
+#include <esp_system.h>
+#include <esp_task_wdt.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,8 +71,9 @@ void event(const char* type, const char* data_json = nullptr) { uplink::event(ty
 
 // seq and ts are filled in by the uplink when the reading is sent or buffered.
 Reading reading(bool doorReason) {
-  return {0,           0,           sensorFault ? NAN : temp, doorOpen(),     comp.on(), power.onBattery(),
-          power.pct(), state,       heat.expS(),              heat.latched(), inputs::manualMode(), doorReason};
+  return {0,           0,     sensorFault ? NAN : temp, doorOpen(),     comp.on(),            power.onBattery(),
+          power.pct(), state, heat.expS(),              heat.latched(), inputs::manualMode(), doorReason,
+          sensors::ambientC()};  // A3: NAN (and omitted) unless a second probe is fitted
 }
 
 // Budget exhausted or SET_LATCH: red solid, one long beep, LATCH_SET. Already persisted by HeatKeeper.
@@ -107,6 +110,8 @@ bool runDeviceCommand(CmdType type, char* detail, size_t cap) {
     case CmdType::SYNC_REQUEST:
       uplink::restartSync(detail, cap);
       return true;
+    case CmdType::ROTATE_SECRET:     // handled inside the uplink (it owns the secret); never routed here
+    case CmdType::SET_CALIBRATION:   // P4: handled inside the uplink too (it reads the offset from the args)
     case CmdType::UNKNOWN:
       break;
   }
@@ -191,6 +196,23 @@ void printHelp() {
 #endif
 }
 
+// Why the chip last reset, for the BOOT event: a watchdog, panic or brownout reset is worth investigating.
+const char* resetReasonName() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "UNKNOWN";
+  }
+}
+
 bool parseFloat(const char* s, float& out) {
   char* end = nullptr;
   out = strtof(s, &end);
@@ -222,6 +244,13 @@ void runCommand(char* line) {
   } else if (strcmp(line, "help") == 0) {
     printHelp();
 #ifdef DEBUG_UNSIGNED_CMDS
+  } else if (strcmp(line, "debug hang") == 0) {
+    // Watchdog test (debug builds only): the loop stops; the task watchdog resets the chip within
+    // WDT_TIMEOUT_S, and the next BOOT event carries reset TASK_WDT.
+    Serial.printf("[debug] hanging the loop: expect a TASK_WDT reset within %lu s\n",
+                  static_cast<unsigned long>(cfg::WDT_TIMEOUT_S));
+    for (;;) {
+    }
   } else if (strncmp(line, "cmd ", 4) == 0) {
     // Bypasses signature checks: compiled in only with -DDEBUG_UNSIGNED_CMDS, never in a normal build.
     char upper[24] = "";
@@ -286,9 +315,12 @@ void setup() {
   pinMode(pins::PIN_RELAY, OUTPUT);
   pinMode(pins::PIN_LED_BLUE, OUTPUT);
   driveCompressor(false);  // defined relay state before anything else runs
+  comp.bootLock(millis());  // a reboot counts as an OFF: the 60 s min-off holds after a reset mid-cycle
   buzzer::begin();
 
   Serial.printf("\nColdChain node %s fw 1.0.0 booting\n", FRIDGE_ID);
+  const char* reset = resetReasonName();
+  Serial.printf("[boot] reset reason %s\n", reset);
   model = ThermalModel(esp_random());
   inputs::begin();
   leds::begin();
@@ -298,7 +330,7 @@ void setup() {
   sensors::begin();
   if (!display::begin(FRIDGE_ID)) Serial.printf("[oled] SSD1306 not found at 0x%02X\n", OLED_I2C_ADDR);
   uplink::onCommand(runDeviceCommand);
-  uplink::begin(FRIDGE_ID);  // BOOT is sent (or buffered) once the clock is valid
+  uplink::begin(FRIDGE_ID, reset);  // BOOT is sent (or buffered) once the clock is valid
   printHelp();
 
   lastStepAt = millis();
@@ -306,6 +338,14 @@ void setup() {
   sample(lastStepAt);
   lastSampleAt = lastStepAt;
   lastDoor = doorOpen();
+
+  // Task watchdog on the control loop, armed last so setup()'s one-off work does not count. The core resets
+  // it after every loop() pass. If the loop hangs (stuck I2C, a library bug) the chip reboots with the relay
+  // OFF instead of leaving the compressor in its last state. The network task is not watched: a TLS handshake
+  // may block it for a long time, and a reboot would drop the RAM buffer; the control loop never waits on it.
+  esp_task_wdt_init(cfg::WDT_TIMEOUT_S, true);  // reconfigures the core's TWDT: timeout, panic -> reset
+  enableLoopWDT();
+  Serial.printf("[wdt] task watchdog on the control loop: %lu s\n", static_cast<unsigned long>(cfg::WDT_TIMEOUT_S));
 }
 
 void loop() {

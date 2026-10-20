@@ -30,6 +30,7 @@ export interface Fridge {
   capacity: number;
   latch: boolean;
   device_id: string | null;
+  calibration_offset_c: number; // P4: last accepted sensor offset (°C)
   load: number;
   batch_counts: Record<BatchStatus, number>;
   status: FridgeStatus;

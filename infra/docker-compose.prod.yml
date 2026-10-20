@@ -1,0 +1,87 @@
+# Production: `docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build` from the repo root
+# (--env-file: Compose itself reads SITE_ADDRESS and HEALTHCHECK_PASSWORD; without it, it looks for infra/.env).
+# Built images (backend and ML non-root), no source mounts, everything restarts on its own, data on named volumes.
+# Published: 80/443 (web app + API through Caddy, HTTPS) and 8883 (devices, MQTT over TLS). Nothing else.
+# Before the first start (docs/backend.md, "Production with Docker"):
+#   - ../.env with real secrets (npm run env:init), NODE_ENV=production, PUBLIC_BASE_URL=https://<SITE_ADDRESS>,
+#     CORS_ORIGIN=https://<SITE_ADDRESS>, MQTT_USERNAME=backend and its MQTT_PASSWORD, SITE_ADDRESS, HEALTHCHECK_PASSWORD;
+#   - mosquitto/passwd.prod (mosquitto_passwd) with accounts backend, healthcheck and one per device;
+#   - mosquitto/certs/server.crt + server.key for the device listener.
+name: coldchain-prod
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - '8883:8883' # devices, TLS
+    volumes:
+      - ./mosquitto:/mosquitto/config-src:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    command: >
+      sh -c "cp /mosquitto/config-src/passwd.prod /mosquitto/config/passwd &&
+             chown mosquitto:mosquitto /mosquitto/config/passwd /mosquitto/data && chmod 0700 /mosquitto/config/passwd &&
+             exec mosquitto -c /mosquitto/config-src/mosquitto.prod.conf"
+    healthcheck:
+      test: ['CMD-SHELL', 'mosquitto_sub -h localhost -p 1883 -u healthcheck -P "$$HEALTHCHECK_PASSWORD" -t "$$SYS/broker/uptime" -C 1 -W 3 > /dev/null']
+      interval: 10s
+      retries: 5
+    environment:
+      HEALTHCHECK_PASSWORD: ${HEALTHCHECK_PASSWORD:?set HEALTHCHECK_PASSWORD (the healthcheck account in passwd.prod)}
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      NODE_ENV: production
+      MQTT_URL: mqtt://mosquitto:1883
+      ML_URL: http://ml:8000
+      DB_PATH: /app/data/coldchain.db
+      BACKUP_DIR: /app/data/backups
+      TRUST_PROXY: loopback, uniquelocal # Caddy reaches the backend over the private Docker network
+      # Prometheus scrapes backend:9464/metrics on the private network; the port is never published
+      METRICS_PORT: 9464
+      METRICS_HOST: 0.0.0.0
+    volumes:
+      - coldchain-data:/app/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      ml:
+        condition: service_healthy
+
+  ml:
+    build:
+      context: ../ml
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_ERROR_DSN: ${VITE_ERROR_DSN:-} # optional (D4)
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - caddy-data:/data # certificates: keep them, or Let's Encrypt rate limits bite
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  coldchain-data:
+  mosquitto-data:
+  caddy-data:
+  caddy-config:

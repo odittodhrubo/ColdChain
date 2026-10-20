@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Bell, Clock, WifiOff } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useT } from '../i18n';
 import { api } from '../lib/api';
 import { ago } from '../lib/time';
 import type { Fridge } from '../lib/types';
@@ -10,14 +11,15 @@ import { VvmMark } from '../ui/VvmMark';
 import { fridgeStatus } from './logic';
 
 function Count({ status, n }: { status: Status; n: number }) {
+  const { t } = useT();
   return (
     <span
-      className="figures inline-flex items-center gap-1.5 text-sm"
+      className="figures inline-flex items-center gap-1.5 text-sm whitespace-nowrap"
       style={{ color: n ? STATUS[status].ink : 'var(--ink-3)' }}
     >
       <VvmMark status={status} size={14} />
       <span className="font-bold">{n}</span>
-      <span className={n ? 'font-medium' : ''}>{STATUS[status].label}</span>
+      <span className={n ? 'font-medium' : ''}>{t(`status.${status}`)}</span>
     </span>
   );
 }
@@ -33,6 +35,7 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 
 /** The whole cold room in one line: fridges, batches, open alerts, offline nodes, data freshness. */
 export function SummaryStrip({ fridges, now }: { fridges: Fridge[]; now: number }) {
+  const { t } = useT();
   const alerts = useQuery({
     queryKey: ['alerts', 'summary'],
     queryFn: async ({ signal }) => {
@@ -59,21 +62,21 @@ export function SummaryStrip({ fridges, now }: { fridges: Fridge[]; now: number 
   return (
     <section
       aria-label="Summary"
-      className="mb-5 grid grid-cols-1 divide-y divide-rule rounded-[var(--radius-label)] border border-rule bg-panel sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-[1.2fr_1.2fr_0.8fr_0.8fr_0.9fr] xl:divide-x"
+      className="mb-5 grid grid-cols-1 divide-y divide-rule rounded-[var(--radius-label)] border border-rule bg-panel sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-[max-content_max-content_1fr_1fr_1fr] xl:divide-x"
     >
-      <Group label="Fridges">
+      <Group label={t('summary.fridges')}>
         <Count status="SAFE" n={n('SAFE')} />
         <Count status="WARNING" n={n('WARNING')} />
         <Count status="BREACH" n={n('BREACH')} />
       </Group>
-      <Group label="Batches">
+      <Group label={t('summary.batches')}>
         <Count status="SAFE" n={batches.SAFE} />
         <Count status="AT_RISK" n={batches.AT_RISK} />
         <Count status="DISCARD" n={batches.DISCARD} />
       </Group>
-      <Group label="Open alerts">
+      <Group label={t('summary.openAlerts')}>
         <span
-          className="figures inline-flex items-center gap-1.5 text-sm font-bold"
+          className="figures inline-flex items-center gap-1.5 text-sm font-bold whitespace-nowrap"
           style={{
             color: alerts.data?.critical
               ? 'var(--breach)'
@@ -84,11 +87,11 @@ export function SummaryStrip({ fridges, now }: { fridges: Fridge[]; now: number 
         >
           <Bell aria-hidden className="size-4" />
           {alerts.data
-            ? `${alerts.data.active}${alerts.data.critical ? ` · ${alerts.data.critical} critical` : ''}`
+            ? `${alerts.data.active}${alerts.data.critical ? ` · ${alerts.data.critical} ${t('summary.critical')}` : ''}`
             : '–'}
         </span>
       </Group>
-      <Group label="Nodes offline">
+      <Group label={t('summary.nodesOffline')}>
         <span
           className="figures inline-flex items-center gap-1.5 text-sm font-bold"
           style={{ color: offline ? 'var(--offline)' : 'var(--ink-3)' }}
@@ -97,13 +100,13 @@ export function SummaryStrip({ fridges, now }: { fridges: Fridge[]; now: number 
           {offline}
         </span>
       </Group>
-      <Group label="Last updated">
+      <Group label={t('summary.lastUpdated')}>
         <span
           className="figures inline-flex items-center gap-1.5 text-sm font-medium text-ink-2"
           aria-live="off"
         >
           <Clock aria-hidden className="size-4" />
-          {lastSeen ? ago((now - lastSeen) / 1000) : 'no data yet'}
+          {lastSeen ? ago((now - lastSeen) / 1000, t) : t('summary.noData')}
         </span>
       </Group>
     </section>

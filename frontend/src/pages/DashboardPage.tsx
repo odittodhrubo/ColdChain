@@ -4,6 +4,7 @@ import { AlertsFeed } from '../dashboard/AlertsFeed';
 import { BudgetPanel } from '../dashboard/BudgetPanel';
 import { FridgeCard } from '../dashboard/FridgeCard';
 import { SummaryStrip } from '../dashboard/SummaryStrip';
+import { useT } from '../i18n';
 import { PageHeader } from '../layout/AppShell';
 import { useFridges } from '../lib/queries';
 import { useServerNow } from '../lib/time';
@@ -12,13 +13,14 @@ import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 
 /** The control-room view: every fridge, every batch's heat budget, open alerts. */
 export function DashboardPage() {
+  const { t } = useT();
   const { data, isPending, error, refetch } = useFridges();
   const now = useServerNow(1000);
   const fridges = data?.fridges ?? [];
 
   return (
     <>
-      <PageHeader title="Dashboard" subtitle="Every fridge and batch at a glance" />
+      <PageHeader title={t('page.dashboard.title')} subtitle={t('page.dashboard.subtitle')} />
       {isPending ? (
         <div className="flex flex-col gap-5">
           <Skeleton className="h-20 w-full" />

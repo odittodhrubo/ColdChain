@@ -5,13 +5,19 @@
 #include <DallasTemperature.h>
 #include <OneWire.h>
 
+#include "calibration.h"
+#include "kv.h"
 #include "node_config.h"
 #include "pins.h"
 
 namespace {
 OneWire oneWire(pins::PIN_DS18B20);
 DallasTemperature ds(&oneWire);
+Calibration cal(nvs::store());  // P4: per-device offset, persisted in NVS
 DeviceAddress addr;
+DeviceAddress ambientAddr;  // A3: optional second probe (index 1 on the bus)
+bool ambientPresent = false;
+float lastAmbient = NAN;
 bool present = false;
 bool pending = false;
 bool lastBad = true;
@@ -27,7 +33,16 @@ void search() {
   ds.begin();
   ds.setWaitForConversion(false);
   present = ds.getAddress(addr, 0);
+  ambientPresent = ds.getAddress(ambientAddr, 1);  // A3: a second probe, if one is wired to the same bus
+  if (!ambientPresent) lastAmbient = NAN;
   pending = false;
+}
+
+void readAmbient() {
+  if (!ambientPresent) return;
+  const float a = ds.getTempC(ambientAddr);
+  lastAmbient = (a != DEVICE_DISCONNECTED_C && a != 85.0f && a > -55.0f && a < 125.0f) ? a : NAN;
+  if (a == DEVICE_DISCONNECTED_C) ambientPresent = false;
 }
 
 void accept(float t, uint32_t now_ms) {
@@ -41,12 +56,14 @@ void accept(float t, uint32_t now_ms) {
 namespace sensors {
 
 void begin() {
+  cal.begin();
   search();
   if (!present) return;
   ds.setWaitForConversion(true);  // setup() only: blocking is fine before the loop starts
-  ds.requestTemperaturesByAddress(addr);
+  ds.requestTemperatures();        // both probes at once if a second one is present
   ds.setWaitForConversion(false);
   accept(ds.getTempC(addr), millis());
+  readAmbient();
 }
 
 void update(uint32_t now_ms) {
@@ -59,18 +76,24 @@ void update(uint32_t now_ms) {
     return;
   }
   if (!pending) {
-    ds.requestTemperaturesByAddress(addr);
+    ds.requestTemperatures();  // A3: convert both probes (one when no second is fitted)
     requestedAt = now_ms;
     pending = true;
   } else if (now_ms - requestedAt >= cfg::DS_CONVERSION_MS) {
     pending = false;
     const float t = ds.getTempC(addr);
     accept(t, now_ms);
+    readAmbient();
     if (t == DEVICE_DISCONNECTED_C) present = false;
   }
 }
 
-float tempC() { return lastTemp; }
+float tempC() { return cal.apply(lastTemp); }  // P4: offset applied before the reading is used or classified
+
+float setCalibration(float offset_c) { return cal.set(offset_c); }
+float calibrationC() { return cal.offsetC(); }
+
+float ambientC() { return lastAmbient; }  // A3: NAN when no second probe is present
 
 bool fault() { return !present || lastBad || millis() - lastValidAt >= cfg::DS_STALE_MS; }
 

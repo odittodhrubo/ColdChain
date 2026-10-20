@@ -3,6 +3,7 @@ import { ArrowRight, PackageX, ShieldAlert, Truck } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { can } from '../auth/permissions';
+import { fmt, useT } from '../i18n';
 import { api, ApiError } from '../lib/api';
 import { mmss } from '../lib/time';
 import type { RelocationPlan } from '../lib/types';
@@ -12,7 +13,7 @@ import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { RISK } from './Forecast';
 
-const URGENCY_LABEL = { HIGH: 'Move first', MEDIUM: 'Soon', LOW: 'When possible' } as const;
+const URGENCY_KEY = { HIGH: 'rel.urgHigh', MEDIUM: 'rel.urgMedium', LOW: 'rel.urgLow' } as const;
 
 function replacePlan(qc: ReturnType<typeof useQueryClient>, plan: RelocationPlan) {
   qc.setQueriesData<RelocationPlan[]>({ queryKey: ['relocations'] }, (old) =>
@@ -21,6 +22,7 @@ function replacePlan(qc: ReturnType<typeof useQueryClient>, plan: RelocationPlan
 }
 
 function DismissDialog({ plan, onClose }: { plan: RelocationPlan; onClose: () => void }) {
+  const { t } = useT();
   const qc = useQueryClient();
   const toast = useToast();
   const [reason, setReason] = useState('');
@@ -31,7 +33,7 @@ function DismissDialog({ plan, onClose }: { plan: RelocationPlan; onClose: () =>
         body: { reason: reason.trim() },
       }),
     onSuccess: () => {
-      toast({ tone: 'info', title: 'Plan dismissed', body: 'No new plan for this fridge for 15 minutes.' });
+      toast({ tone: 'info', title: t('rel.dismissed'), body: t('rel.dismissedBody') });
       void qc.invalidateQueries({ queryKey: ['relocations'] });
       onClose();
     },
@@ -41,11 +43,11 @@ function DismissDialog({ plan, onClose }: { plan: RelocationPlan; onClose: () =>
     <Modal
       open
       onClose={onClose}
-      title="Dismiss this plan?"
+      title={t('rel.dismissTitle')}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={dismiss.isPending}>
-            Keep it
+            {t('rel.keepIt')}
           </Button>
           <Button
             variant="danger"
@@ -53,17 +55,17 @@ function DismissDialog({ plan, onClose }: { plan: RelocationPlan; onClose: () =>
             loading={dismiss.isPending}
             onClick={() => dismiss.mutate()}
           >
-            Dismiss plan
+            {t('rel.dismissPlan')}
           </Button>
         </>
       }
     >
       <Field
-        label="Why? (kept in the audit log)"
+        label={t('rel.dismissWhy')}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         error={dismiss.error instanceof Error ? dismiss.error.message : null}
-        hint="For example: batches already moved by hand, or the fridge has been repaired."
+        hint={t('rel.dismissHint')}
       />
     </Modal>
   );
@@ -74,6 +76,7 @@ function DismissDialog({ plan, onClose }: { plan: RelocationPlan; onClose: () =>
  * click (Admin / Pharmacist; everyone else reads it). A 409 shows the refreshed plan and what changed.
  */
 export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
+  const { t } = useT();
   const { user } = useAuth();
   const mayConfirm = can(user?.role, 'relocation:confirm');
   const qc = useQueryClient();
@@ -93,9 +96,9 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
       const n = done.moves.length;
       toast({
         tone: 'success',
-        title: `Relocation confirmed: ${n} batch${n === 1 ? '' : 'es'} moved`,
+        title: fmt(t('rel.confirmed'), { n }),
         body: [...new Set(done.moves.map((m) => m.to_fridge_name))].join(', '),
-        link: { to: '/audit?type=RELOCATION_CONFIRMED', label: 'View the audit entry' },
+        link: { to: '/audit?type=RELOCATION_CONFIRMED', label: t('rel.viewAudit') },
       });
       replacePlan(qc, done);
       for (const key of ['relocations', 'batches', 'batch', 'fridges', 'fridge', 'alerts'])
@@ -112,7 +115,7 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
       } else
         toast({
           tone: 'error',
-          title: 'Could not confirm',
+          title: t('rel.couldNotConfirm'),
           body: err instanceof Error ? err.message : undefined,
         });
       void qc.invalidateQueries({ queryKey: ['relocations'] });
@@ -136,20 +139,20 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
           <div className="min-w-0">
             <h2 id={`plan-${plan.id}`} className="text-base font-bold text-ink">
               {none
-                ? `No safe fridge for the batches in ${plan.from_fridge_name}`
-                : `Move batches out of ${plan.from_fridge_name}`}
+                ? fmt(t('rel.noSafe'), { f: plan.from_fridge_name })
+                : fmt(t('rel.moveOut'), { f: plan.from_fridge_name })}
             </h2>
             <p className="text-sm text-ink">
-              {plan.from_fridge_name} may become unsafe because {plan.risk}.
+              {fmt(t('rel.mayUnsafe'), { f: plan.from_fridge_name, r: plan.risk })}
             </p>
           </div>
         </div>
         {plan.status === 'PROPOSED' && (
           <span
             className="figures text-xs font-semibold text-ink-2"
-            aria-label={`Plan expires in ${mmss(left)}`}
+            aria-label={fmt(t('rel.expiresAria'), { t: mmss(left) })}
           >
-            expires in {mmss(left)}
+            {fmt(t('rel.expiresIn'), { t: mmss(left) })}
           </span>
         )}
       </header>
@@ -160,9 +163,7 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
             role="alert"
             className="rounded-md border border-warning/50 bg-warning-wash px-3 py-2 text-sm text-ink"
           >
-            <p className="font-semibold">
-              The situation changed, so nothing was moved. Check the updated plan below.
-            </p>
+            <p className="font-semibold">{t('rel.changedTitle')}</p>
             <ul className="mt-1 list-disc pl-5 text-ink-2">
               {changed.map((c) => (
                 <li key={c}>{c}</li>
@@ -187,20 +188,20 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="figures w-full min-w-[32rem] border-collapse text-left text-sm">
-              <caption className="sr-only">Proposed moves</caption>
+              <caption className="sr-only">{t('rel.proposedMoves')}</caption>
               <thead>
                 <tr className="text-xs tracking-wide text-ink-2 uppercase">
                   <th scope="col" className="border-b border-rule py-2 pr-3 font-semibold">
-                    Batch
+                    {t('rel.colBatch')}
                   </th>
                   <th scope="col" className="border-b border-rule py-2 pr-3 font-semibold">
-                    To
+                    {t('rel.colTo')}
                   </th>
                   <th scope="col" className="border-b border-rule py-2 pr-3 font-semibold">
-                    Budget left
+                    {t('rel.colBudget')}
                   </th>
                   <th scope="col" className="border-b border-rule py-2 font-semibold">
-                    Urgency
+                    {t('rel.colUrgency')}
                   </th>
                 </tr>
               </thead>
@@ -209,7 +210,9 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
                   <tr key={m.batch_id} className="border-b border-rule last:border-b-0">
                     <td className="py-2 pr-3">
                       <span className="block font-semibold text-ink">{m.batch_name}</span>
-                      <span className="block text-xs text-ink-3">Lot {m.lot_number}</span>
+                      <span className="block text-xs text-ink-3">
+                        {t('rel.lot')} {m.lot_number}
+                      </span>
                     </td>
                     <td className="py-2 pr-3 font-medium text-ink">
                       <span className="inline-flex items-center gap-1.5">
@@ -223,7 +226,7 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap"
                         style={{ color: RISK[m.urgency].ink, backgroundColor: RISK[m.urgency].wash }}
                       >
-                        {URGENCY_LABEL[m.urgency]}
+                        {t(URGENCY_KEY[m.urgency])}
                       </span>
                     </td>
                   </tr>
@@ -237,9 +240,9 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
           <div className="grid gap-3 sm:grid-cols-2">
             {plan.shortfall.length > 0 && (
               <div className="rounded-md bg-panel-2 px-3 py-2 text-sm">
-                <p className="font-semibold text-ink">No room for {plan.shortfall.length}</p>
+                <p className="font-semibold text-ink">{fmt(t('rel.noRoom'), { n: plan.shortfall.length })}</p>
                 <p className="text-ink-2">
-                  {plan.shortfall.map((s) => s.batch_name).join(', ')}: use a portable cooler.
+                  {fmt(t('rel.noRoomBody'), { names: plan.shortfall.map((s) => s.batch_name).join(', ') })}
                 </p>
               </div>
             )}
@@ -247,7 +250,7 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
               <div className="rounded-md bg-panel-2 px-3 py-2 text-sm">
                 <p className="flex items-center gap-1.5 font-semibold text-discard">
                   <PackageX aria-hidden className="size-4" />
-                  Dispose, cannot be saved
+                  {t('rel.dispose')}
                 </p>
                 <p className="text-ink-2">{plan.unsaveable.map((s) => s.batch_name).join(', ')}</p>
               </div>
@@ -257,11 +260,15 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
 
         {!none && plan.targets.length > 0 && (
           <p className="figures text-sm text-ink-2">
-            <span className="font-semibold text-ink">Destination safety: </span>
+            <span className="font-semibold text-ink">{t('rel.destSafety')}</span>
             {plan.targets
-              .map(
-                (t) =>
-                  `${t.name} forecast at most ${t.p90?.toFixed(1) ?? '?'} °C, health ${t.health === null ? '?' : Math.round(t.health)}, ${t.free} free`,
+              .map((tg) =>
+                fmt(t('rel.destEach'), {
+                  name: tg.name,
+                  p: tg.p90?.toFixed(1) ?? '?',
+                  h: tg.health === null ? '?' : Math.round(tg.health),
+                  free: tg.free,
+                }),
               )
               .join(' · ')}
           </p>
@@ -278,27 +285,28 @@ export function PlanCard({ plan, now }: { plan: RelocationPlan; now: number }) {
                   disabled={confirm.isPending}
                   icon={<Truck aria-hidden className="size-4" />}
                 >
-                  {confirm.isPending ? 'Moving batches…' : 'Confirm relocation'}
+                  {confirm.isPending ? t('rel.moving') : t('rel.confirm')}
                 </Button>
               )}
               <Button variant="ghost" onClick={() => setDismissing(true)} disabled={confirm.isPending}>
-                Dismiss
+                {t('rel.dismiss')}
               </Button>
-              {!none && (
-                <span className="text-xs text-ink-3">
-                  The AI only suggests: nothing moves until you confirm.
-                </span>
-              )}
+              {!none && <span className="text-xs text-ink-3">{t('rel.onlySuggest')}</span>}
             </div>
           ) : (
-            <p className="text-sm text-ink-2">Read only: an Admin or Pharmacist confirms relocations.</p>
+            <p className="text-sm text-ink-2">{t('rel.readOnly')}</p>
           )
         ) : (
-          <p className="text-sm font-semibold text-ink-2">
-            {plan.status === 'CONFIRMED'
-              ? 'Confirmed: the batches were moved.'
-              : `This plan is ${plan.status.toLowerCase()}.`}
-          </p>
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-semibold text-ink-2">
+              {plan.status === 'CONFIRMED'
+                ? t('rel.confirmedMsg')
+                : fmt(t('rel.statusMsg'), { s: plan.status.toLowerCase() })}
+            </p>
+            {plan.decision_note && (
+              <p className="text-sm text-ink-2">{fmt(t('rel.decisionNote'), { note: plan.decision_note })}</p>
+            )}
+          </div>
         )}
       </div>
       {dismissing && <DismissDialog plan={plan} onClose={() => setDismissing(false)} />}

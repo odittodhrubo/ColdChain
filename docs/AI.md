@@ -36,7 +36,7 @@ These figures come from the test split: held-out fridges plus the last 10 days.
   - median plus quantile gradient boosting, conformalised to 80 %;
   - a calibrated breach classifier, chosen over the forecast rule on validation recall;
   - health: gradient boosting minus an IsolationForest anomaly signal, with a rule-based fallback.
-- **Service** (`ml/app/main.py`): FastAPI `/predict`, about 80 ms per call. The models load once and only from `ml/models`.
+- **Service** (`ml/app/main.py`): FastAPI `/predict`, about 80 ms per call. The models load once, only from `ml/models`, and only after each file matches the SHA-256 that training wrote into `model_card.json`, because a joblib file is a pickle and loading one can run code.
 - **Backend loop** (`backend/src/ml/`, `backend/src/modules/relocation/`):
   - runs every 30 s, with a 1 s budget per call;
   - the rule-based fallback is labelled when the service is down;

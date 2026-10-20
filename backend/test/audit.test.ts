@@ -352,6 +352,13 @@ describe('audit API', () => {
     const page = await t.http().get('/api/audit?type=AUTH_FAIL&page=1&pageSize=1').set(auth);
     expect(page.body).toMatchObject({ total: 1, page: 1, pageSize: 1 });
     expect(page.body.entries[0].payload).toMatchObject({ email: admin.email, reason: 'BAD_CREDENTIALS' });
+
+    // actor filter is a case-insensitive substring: a partial or differently-cased actor still matches
+    const exact = (await t.http().get(`/api/audit?actor=user:${admin.id}`).set(auth)).body.total;
+    expect(exact).toBeGreaterThan(0);
+    expect((await t.http().get(`/api/audit?actor=USER:${admin.id}`).set(auth)).body.total).toBe(exact);
+    expect((await t.http().get('/api/audit?actor=user').set(auth)).body.total).toBe(exact);
+    expect((await t.http().get('/api/audit?actor=nobody').set(auth)).body.total).toBe(0);
   });
 
   it('verify returns valid for a clean log, logs itself without breaking the next check, and detects tampering', async () => {
@@ -367,6 +374,27 @@ describe('audit API', () => {
     expect((await t.http().get('/api/audit/verify').set(auth)).body).toMatchObject({
       valid: false,
       reason: 'HASH_MISMATCH',
+      firstBrokenId: 1,
+    });
+  });
+
+  it('lists a row whose payload is no longer JSON (edited outside the app) as raw text, never a 500', async () => {
+    const t = makeApp();
+    const auth = bearer(tokenFor(t, await addUser(t, 'INSPECTOR')));
+    appendAudit(t.db, 'system', 'DEVICE_EVENT', { x: 1 });
+    unlock(t.db);
+    t.db.prepare(`UPDATE audit_log SET payload = '{"x":1} [tampered]' WHERE id = 1`).run(); // as tamper.py does
+    const res = await t.http().get('/api/audit').set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.entries.at(-1)).toMatchObject({
+      id: 1,
+      payload: '{"x":1} [tampered]',
+      payload_invalid: true,
+    });
+    const byBatch = await t.http().get('/api/audit?batch_id=3').set(auth); // json_extract must not raise
+    expect(byBatch.status).toBe(200);
+    expect((await t.http().get('/api/audit/verify').set(auth)).body).toMatchObject({
+      valid: false,
       firstBrokenId: 1,
     });
   });

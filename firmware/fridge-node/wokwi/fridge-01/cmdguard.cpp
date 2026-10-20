@@ -79,5 +79,7 @@ CmdType parseCmdType(const char* s) {
   if (strcmp(s, "SET_LATCH") == 0) return CmdType::SET_LATCH;
   if (strcmp(s, "BUZZER_TEST") == 0) return CmdType::BUZZER_TEST;
   if (strcmp(s, "SYNC_REQUEST") == 0) return CmdType::SYNC_REQUEST;
+  if (strcmp(s, "ROTATE_SECRET") == 0) return CmdType::ROTATE_SECRET;
+  if (strcmp(s, "SET_CALIBRATION") == 0) return CmdType::SET_CALIBRATION;
   return CmdType::UNKNOWN;
 }

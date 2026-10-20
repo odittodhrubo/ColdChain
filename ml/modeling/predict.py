@@ -7,6 +7,8 @@ Models are loaded only from ml/models (a trusted path inside the service); nothi
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,11 +145,35 @@ class HealthModel:
         )
 
 
+MODEL_FILES = ("forecast.joblib", "health.joblib")
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def verify_files(directory: Path = MODELS) -> None:
+    """A joblib file is a pickle: loading one can run code. Each must match the SHA-256 that train.py wrote
+    into model_card.json, or nothing is unpickled (the backend's rule-based fallback answers instead)."""
+    card = json.loads((directory / "model_card.json").read_text(encoding="utf-8"))
+    expected = card.get("files") or {}
+    for name in MODEL_FILES:
+        if name not in expected:
+            raise ValueError(f"model_card.json has no sha256 for {name}: retrain (npm run ml:train)")
+        if file_sha256(directory / name) != expected[name]:
+            raise ValueError(f"{name} does not match its sha256 in model_card.json: refusing to load it")
+
+
 def load(directory: Path = MODELS) -> tuple[Forecaster, HealthModel]:
-    """The trained bundles from ml/models. Refuses anything outside that directory."""
+    """The trained bundles from ml/models, once their hashes check out. Only ml/models is accepted."""
     directory = directory.resolve()
     if directory != MODELS.resolve():
         raise ValueError("models are only loaded from ml/models")
+    verify_files(directory)
     forecast = joblib.load(directory / "forecast.joblib")
     health = joblib.load(directory / "health.joblib")
     if list(forecast["features"]) != list(FEATURES) or list(health["features"]) != list(HEALTH_FEATURES):

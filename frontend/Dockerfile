@@ -1,5 +1,5 @@
 # Dev image: source is bind-mounted by infra/docker-compose.yml; node_modules stay in the image.
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

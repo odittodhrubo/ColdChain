@@ -2,3 +2,12 @@
 *.png binary
 *.jpg binary
 *.ico binary
+# model files are verified by SHA-256 before loading (ml/modeling/predict.py): never touch their bytes
+*.joblib binary
+
+# Generated (tools/gen_wokwi.py, npm --prefix backend run docs:api): collapsed in GitHub diffs and language stats.
+# Still committed: Wokwi's web editor needs the flat copies, and `make test` fails when they are stale.
+firmware/fridge-node/wokwi/fridge-0*/*.cpp linguist-generated=true
+firmware/fridge-node/wokwi/fridge-0*/*.h linguist-generated=true
+firmware/fridge-node/wokwi/fridge-0*/*.ino linguist-generated=true
+docs/API.md linguist-generated=true

@@ -1,21 +1,23 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { CircleCheck, CircleX, Copy, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { session } from '../auth/session';
+import { CircleCheck, CircleX, Copy, Info, ShieldCheck } from 'lucide-react';
+import { Fragment, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import { fmt, useT } from '../i18n';
 import { PageHeader } from '../layout/AppShell';
 import { api, ApiError } from '../lib/api';
 import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
+import { Pager } from '../ui/Pager';
 import { Panel } from '../ui/Panel';
 import { Select } from '../ui/Select';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 import { useToast } from '../ui/Toast';
 
-const PAGE = 50;
+const PAGE = 20; // rows per page, like the fridge recordings
 const TYPES = [
   'AUTH_LOGIN', 'AUTH_FAIL', 'USER_CREATED', 'USER_UPDATED', 'USER_DISABLED', 'BATCH_CREATED', 'BATCH_UPDATED',
   'BATCH_MOVED', 'BATCH_STATUS_CHANGED', 'LATCH_RESET', 'DISCARD_ACK', 'ALERT_RAISED', 'ALERT_ACKED', 'ALERT_RESOLVED',
-  'SECURITY_REJECT', 'RELOCATION_PROPOSED', 'RELOCATION_CONFIRMED', 'RELOCATION_DISMISSED', 'DEVICE_EVENT', 'BREACH_START', 'BREACH_END', 'TELEMETRY_CHECKPOINT', 'AUDIT_VERIFY',
+  'SECURITY_REJECT', 'RELOCATION_PROPOSED', 'RELOCATION_CONFIRMED', 'RELOCATION_DISMISSED', 'DEVICE_EVENT', 'BREACH_START', 'BREACH_END', 'TELEMETRY_CHECKPOINT', 'AUDIT_VERIFY', 'READINGS_RETIRED',
 ]; // prettier-ignore
 
 interface Entry {
@@ -23,7 +25,8 @@ interface Entry {
   ts: number;
   actor: string;
   event_type: string;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | string; // raw text when the stored payload is no longer JSON (tampered)
+  payload_invalid?: boolean;
   prev_hash: string;
   hash: string;
 }
@@ -34,6 +37,7 @@ export interface VerifyResult {
   headHash: string;
   firstBrokenId?: number;
   reason?: string;
+  externalAnchor?: { headId: number; at: number; url: string } | null; // S8: signed by a Time-Stamp Authority
   expected?: string | number;
   actual?: string | number | null;
 }
@@ -43,7 +47,7 @@ export async function verifyStream(
   onProgress: (checked: number, total: number) => void,
 ): Promise<VerifyResult> {
   const res = await fetch('/api/audit/verify?stream=1', {
-    headers: { Authorization: `Bearer ${session.get()?.token ?? ''}` },
+    credentials: 'same-origin', // the HttpOnly session cookie
   });
   if (!res.ok || !res.body) {
     const body = (await res.json().catch(() => null)) as {
@@ -78,16 +82,9 @@ export async function verifyStream(
 }
 
 const short = (h: string) => `${h.slice(0, 10)}…`;
-const REASON_TEXT: Record<string, string> = {
-  HASH_MISMATCH: 'the record was edited (its hash no longer matches its content)',
-  PREV_LINK_BROKEN: 'the link to the previous record is broken (edited, inserted or reordered)',
-  ID_GAP: 'a record is missing (deleted)',
-  GENESIS_INVALID: 'the first record does not start the chain',
-  ANCHOR_MISMATCH: 'the log no longer matches its external anchor (truncated or rewritten)',
-  READINGS_TAMPERED: 'stored readings no longer match their checkpoint',
-};
 
 export function AuditPage() {
+  const { t } = useT();
   const toast = useToast();
   const [params] = useSearchParams(); // deep links, e.g. ?type=RELOCATION_CONFIRMED from a toast
   const [type, setType] = useState(() =>
@@ -111,6 +108,7 @@ export function AuditPage() {
       return api<{ entries: Entry[]; total: number }>(`/api/audit?${qs}`, { signal });
     },
   });
+  const [detail, setDetail] = useState<Entry | null>(null);
   const broken = verify.state === 'done' && !verify.result.valid ? verify.result.firstBrokenId : undefined;
 
   async function run() {
@@ -128,30 +126,30 @@ export function AuditPage() {
   }
   const copy = (h: string) =>
     void navigator.clipboard?.writeText(h).then(
-      () => toast({ tone: 'success', title: 'Hash copied' }),
-      () => toast({ tone: 'error', title: "Couldn't copy" }),
+      () => toast({ tone: 'success', title: t('audit.hashCopied') }),
+      () => toast({ tone: 'error', title: t('audit.copyFail') }),
     );
   const pages = Math.max(1, Math.ceil((list.data?.total ?? 0) / PAGE));
 
   return (
     <>
       <PageHeader
-        title="Audit Log"
-        subtitle="Every action, hash-chained: each record's hash covers the one before it"
+        title={t('page.audit.title')}
+        subtitle={t('page.audit.subtitle')}
         actions={
           <Button
             icon={<ShieldCheck aria-hidden className="size-4" />}
             loading={verify.state === 'running'}
             onClick={() => void run()}
           >
-            Verify Integrity
+            {t('audit.verify')}
           </Button>
         }
       />
       {verify.state === 'running' && (
         <div role="status" className="mb-5 rounded-[var(--radius-label)] border border-rule bg-panel p-4">
           <p className="figures text-sm font-semibold text-ink">
-            Verifying… {verify.checked} of {verify.total || '…'} records
+            {fmt(t('audit.verifying'), { c: verify.checked, t: verify.total || '…' })}
           </p>
           <span className="mt-2 block h-2 overflow-hidden rounded-full bg-panel-2">
             <span
@@ -169,8 +167,17 @@ export function AuditPage() {
           >
             <CircleCheck aria-hidden className="mt-0.5 size-5 shrink-0 text-safe" />
             <div className="figures min-w-0 text-sm">
-              <p className="font-bold text-safe">Chain intact — {verify.result.checked} records verified</p>
-              <p className="truncate text-ink-2">head hash {verify.result.headHash}</p>
+              <p className="font-bold text-safe">{fmt(t('audit.intact'), { n: verify.result.checked })}</p>
+              <p className="truncate text-ink-2">{fmt(t('audit.headHash'), { h: verify.result.headHash })}</p>
+              {verify.result.externalAnchor && (
+                <p className="text-ink-2">
+                  {fmt(t('audit.alsoTimestamped'), {
+                    id: verify.result.externalAnchor.headId,
+                    host: new URL(verify.result.externalAnchor.url).host,
+                    date: new Date(verify.result.externalAnchor.at).toLocaleString(),
+                  })}
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -181,14 +188,21 @@ export function AuditPage() {
             <CircleX aria-hidden className="mt-0.5 size-5 shrink-0 text-breach" />
             <div className="figures min-w-0 text-sm">
               <p className="font-bold text-breach">
-                Tampering detected at record #{verify.result.firstBrokenId} ({verify.result.reason})
+                {fmt(t('audit.tampering'), {
+                  id: verify.result.firstBrokenId ?? '',
+                  reason: verify.result.reason ?? '',
+                })}
               </p>
-              <p className="text-ink">{REASON_TEXT[verify.result.reason ?? ''] ?? ''}</p>
+              <p className="text-ink">
+                {verify.result.reason
+                  ? t(`audit.reason.${verify.result.reason}` as 'audit.reason.ID_GAP')
+                  : ''}
+              </p>
               {verify.result.expected !== undefined && (
                 <p className="mt-1 break-all text-xs text-ink-2">
-                  expected {String(verify.result.expected)}
+                  {fmt(t('audit.expected'), { v: String(verify.result.expected) })}
                   <br />
-                  actual {String(verify.result.actual)}
+                  {fmt(t('audit.actual'), { v: String(verify.result.actual) })}
                 </p>
               )}
             </div>
@@ -203,23 +217,23 @@ export function AuditPage() {
       <Panel bodyClassName="">
         <div className="flex flex-wrap items-end gap-3 border-b border-rule p-4">
           <Select
-            label="Event type"
+            label={t('audit.eventType')}
             hideLabel
             value={type}
             onChange={(e) => (setType(e.target.value), setPage(1))}
             className="w-60"
           >
-            <option value="">All events</option>
-            {TYPES.map((t) => (
-              <option key={t}>{t}</option>
+            <option value="">{t('audit.allEvents')}</option>
+            {TYPES.map((code) => (
+              <option key={code}>{code}</option>
             ))}
           </Select>
           <label className="flex min-h-10 items-center rounded-[var(--radius-label)] border border-rule-strong bg-panel px-3 focus-within:border-teal">
-            <span className="sr-only">Actor</span>
+            <span className="sr-only">{t('audit.actor')}</span>
             <input
               value={actor}
               onChange={(e) => (setActor(e.target.value), setPage(1))}
-              placeholder="Actor, e.g. user:1 or device:fridge-01"
+              placeholder={t('audit.actorPlaceholder')}
               className="w-72 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-ink-3"
             />
           </label>
@@ -235,7 +249,7 @@ export function AuditPage() {
             <ErrorState error={list.error} onRetry={() => void list.refetch()} />
           </div>
         ) : list.data.entries.length === 0 ? (
-          <EmptyState title="No records match">Clear the filters to see the whole log.</EmptyState>
+          <EmptyState title={t('audit.noMatch')}>{t('audit.noMatchBody')}</EmptyState>
         ) : (
           <>
             <div className="relative overflow-x-auto">
@@ -243,7 +257,15 @@ export function AuditPage() {
                 <caption className="sr-only">Hash-chained audit log, newest first</caption>
                 <thead className="bg-panel-2">
                   <tr>
-                    {['#', 'Time', 'Actor', 'Event', 'Payload', 'Prev hash', 'Hash'].map((h) => (
+                    {[
+                      '#',
+                      t('audit.colTime'),
+                      t('audit.colActor'),
+                      t('audit.colEvent'),
+                      t('audit.colPayload'),
+                      t('audit.colPrevHash'),
+                      t('audit.colHash'),
+                    ].map((h) => (
                       <th
                         key={h}
                         scope="col"
@@ -252,6 +274,9 @@ export function AuditPage() {
                         {h}
                       </th>
                     ))}
+                    <th scope="col" className="border-b border-rule px-3 py-2.5">
+                      <span className="sr-only">{t('audit.details')}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -289,28 +314,78 @@ export function AuditPage() {
                             </button>
                           </td>
                         ))}
+                        <td className="px-3 py-2 text-right">
+                          <Button
+                            variant="secondary"
+                            className="min-h-8 px-2.5"
+                            icon={<Info aria-hidden className="size-4" />}
+                            onClick={() => setDetail(e)}
+                          >
+                            {t('audit.details')}
+                          </Button>
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-rule px-4 py-3 text-sm text-ink-2">
-              <span className="figures">
-                {list.data.total} records · page {page} of {pages}
-              </span>
-              <span className="flex gap-2">
-                <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  Newer
-                </Button>
-                <Button variant="secondary" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-                  Older
-                </Button>
-              </span>
-            </div>
+            <Pager
+              page={page - 1}
+              pages={pages}
+              setPage={(p) => setPage(p + 1)}
+              from={list.data.total ? (page - 1) * PAGE + 1 : 0}
+              to={Math.min(list.data.total, page * PAGE)}
+              total={list.data.total}
+              label={t('page.audit.title')}
+            />
           </>
         )}
       </Panel>
+      {detail && (
+        <Modal
+          open
+          onClose={() => setDetail(null)}
+          title={fmt(t('audit.detailsTitle'), { id: detail.id })}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                icon={<Copy aria-hidden className="size-4" />}
+                onClick={() => copy(JSON.stringify(detail, null, 2))}
+              >
+                {t('audit.copyRow')}
+              </Button>
+              <Button onClick={() => setDetail(null)}>{t('audit.close')}</Button>
+            </>
+          }
+        >
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {[
+              [t('audit.record'), String(detail.id)],
+              [t('audit.colTime'), new Date(detail.ts).toLocaleString()],
+              [t('audit.colActor'), detail.actor],
+              [t('audit.colEvent'), detail.event_type],
+            ].map(([k, v]) => (
+              <Fragment key={k}>
+                <dt className="font-semibold text-ink-2">{k}</dt>
+                <dd className="figures break-all text-ink">{v}</dd>
+              </Fragment>
+            ))}
+            <dt className="font-semibold text-ink-2">{t('audit.colPrevHash')}</dt>
+            <dd className="font-mono text-xs break-all text-ink-2">{detail.prev_hash}</dd>
+            <dt className="font-semibold text-ink-2">{t('audit.colHash')}</dt>
+            <dd className="font-mono text-xs break-all text-ink-2">{detail.hash}</dd>
+          </dl>
+          {detail.payload_invalid && (
+            <p className="mt-4 text-sm font-semibold text-breach">{t('audit.payloadInvalid')}</p>
+          )}
+          <p className="mt-4 mb-1 text-sm font-semibold text-ink-2">{t('audit.colPayload')}</p>
+          <pre className="max-h-80 overflow-auto rounded-md bg-panel-2 p-3 font-mono text-xs text-ink">
+            {typeof detail.payload === 'string' ? detail.payload : JSON.stringify(detail.payload, null, 2)}
+          </pre>
+        </Modal>
+      )}
     </>
   );
 }

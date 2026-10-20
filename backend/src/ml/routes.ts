@@ -3,6 +3,7 @@ import { notFound } from '../shared/errors';
 import { defineRoute, type RouteDef } from '../shared/http';
 import { mlGet } from './client';
 import { fromRow, type PredictionRow } from './engine';
+import { accuracy } from './scoring';
 
 const FIGURE = /^[a-z_]+\.png$/;
 
@@ -39,6 +40,13 @@ export function mlRoutes(): RouteDef[] {
           server_time: now,
         };
       },
+    }),
+    // A1: live forecast accuracy — rolling 24 h error per fridge, with the offline test MAE it is judged against.
+    defineRoute({
+      method: 'get',
+      path: '/api/ml/accuracy',
+      access: { permission: 'dashboard:read' },
+      handler: (_in, ctx) => accuracy(ctx),
     }),
     defineRoute({
       method: 'get',

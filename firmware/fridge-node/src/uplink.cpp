@@ -8,6 +8,7 @@
 #include "kv.h"
 #include "net.h"
 #include "ringbuf.h"
+#include "sensors.h"
 #include "seqstore.h"
 #include "settings.h"
 #include "syncer.h"
@@ -29,6 +30,15 @@ const char* disabledNote = nullptr;
 SeqStore seq(nvs::store());
 RingBuffer buffer;  // 720 x 16 B, static: never on the heap
 Syncer syncer(buffer);
+// R1: what was published live, kept until it ages out (the last 720 = 60 min). A publish only reached the
+// socket: if the backend was down, the broker dropped it (QoS 0). The server finds the seq gap and asks
+// for exactly that range back with SYNC_REQUEST {from_seq, to_seq}.
+RingBuffer recent;
+// S7: a secret rotated over the air lives here (and in NVS), and wins over config.h from then on
+char rotatedSecret[crypto::SIG_HEX_LEN + 1] = "";
+constexpr const char* SECRET_KEY = "dev_secret";  // NVS key (15 chars max)
+bool replayRange = false;
+uint32_t replayFrom = 0, replayTo = 0;
 
 char tTelemetry[96], tEvent[96], tSync[96], tAck[96], tCmd[96], tCmdack[96], tStatus[96];
 
@@ -43,6 +53,7 @@ uplink::CommandHandler handler = nullptr;
 uint32_t rejected = 0, rejectedAcks = 0;
 
 bool bootPending = true;
+const char* resetReason = "UNKNOWN";
 bool wasUp = false, everUp = false;
 uint32_t sent = 0, buffered = 0, noClock = 0, tooBig = 0;
 char footer[24];
@@ -86,16 +97,21 @@ bool sendSigned(const char* kind, const char* topic, const char* bodyStr) {
 void deliverReading(Reading& r) {
   if (net::uplink()) {
     const LiveExtras live{static_cast<uint32_t>(buffer.size()), net::status().rssi, buffer.dropped()};
-    if (msg::telemetryBody(r, &live, body, sizeof body) && sendSigned("telemetry", tTelemetry, body)) return;
+    if (msg::telemetryBody(r, &live, body, sizeof body) && sendSigned("telemetry", tTelemetry, body)) {
+      recent.push(packReading(r));  // sent, not yet known to be stored: replayable (R1)
+      return;
+    }
   }
   buffer.push(packReading(r));
   buffered++;
 }
 
 void deliverEvent(uint32_t s, uint32_t ts, const char* type, const char* data_json) {
-  if (net::uplink() && msg::eventBody(s, ts, type, data_json, body, sizeof body) && sendSigned("event", tEvent, body))
-    return;
   const int code = eventCode(type);
+  if (net::uplink() && msg::eventBody(s, ts, type, data_json, body, sizeof body) && sendSigned("event", tEvent, body)) {
+    if (code >= 0) recent.push(packEvent(s, ts, code));  // replayable like a reading (data is not kept)
+    return;
+  }
   if (code < 0) return;
   buffer.push(packEvent(s, ts, code));  // buffered events keep type, seq and ts; data is not stored
   buffered++;
@@ -116,6 +132,25 @@ void reply(const char* cmdId, bool ok, const char* detail) {
   if (msg::cmdackBody(cmdId, ok, detail, body, sizeof body)) sendSigned("cmdack", tCmdack, body);
 }
 
+// ROTATE_SECRET {nonce, ct, tag}: the new secret sealed under the current one (crypto::rotateOpen). On success it
+// is stored in NVS first, then used for everything from here on, including this command's cmdack: the server
+// accepts a message signed with its pending secret as the proof that the device switched, and promotes it.
+void rotateSecret(const char* cmdId, JsonVariantConst args) {
+  char next[crypto::SIG_HEX_LEN + 1];
+  if (!crypto::rotateOpen(secret, args["nonce"] | "", args["ct"] | "", args["tag"] | "", next)) {
+    rejected++;
+    Serial.println("[cmd] ROTATE_SECRET refused: the sealed secret did not verify (key unchanged)");
+    reply(cmdId, false, "sealed secret did not verify");
+    return;
+  }
+  nvs::store().putStr(SECRET_KEY, next);  // persisted before use: a reboot right now still has the new key
+  strcpy(rotatedSecret, next);
+  secret = rotatedSecret;
+  guard->setSecret(rotatedSecret);
+  Serial.println("[cmd] ROTATE_SECRET ok: new device secret in use (config.h is now stale)");
+  reply(cmdId, true, "secret rotated");
+}
+
 // Only authenticated commands get a cmdack: an attacker learns nothing from a rejected forgery.
 void handleCommand(const net::Incoming& in) {
   JsonDocument cmd;
@@ -133,6 +168,29 @@ void handleCommand(const net::Incoming& in) {
     rejected++;
     Serial.printf("[cmd] rejected: type '%s' not allowed (total %lu)\n", typeName, static_cast<unsigned long>(rejected));
     reply(cmdId, false, "unknown command type");
+    return;
+  }
+  if (type == CmdType::SYNC_REQUEST) {  // the server names the gap it found (R1); none: replay everything kept
+    JsonVariantConst args = cmd["args"];
+    replayRange = args["from_seq"].is<uint32_t>() && args["to_seq"].is<uint32_t>();
+    replayFrom = replayRange ? args["from_seq"].as<uint32_t>() : 0;
+    replayTo = replayRange ? args["to_seq"].as<uint32_t>() : 0;
+  }
+  if (type == CmdType::ROTATE_SECRET) {  // S7: the uplink owns the secret, so it handles this one itself
+    rotateSecret(cmdId, cmd["args"]);
+    return;
+  }
+  if (type == CmdType::SET_CALIBRATION) {  // P4: offset the DS18B20 reading; the server bounds it, we clamp too
+    JsonVariantConst args = cmd["args"];
+    if (args["offset_c"].isNull()) {
+      reply(cmdId, false, "missing offset_c");
+      return;
+    }
+    const float applied = sensors::setCalibration(args["offset_c"].as<float>());
+    char d[48];
+    snprintf(d, sizeof d, "offset %.2f C", applied);
+    Serial.printf("[cmd] SET_CALIBRATION ok: %s\n", d);
+    reply(cmdId, true, d);
     return;
   }
   char detail[64] = "";
@@ -174,13 +232,21 @@ void pumpSync(uint32_t now_ms) {
 
 namespace uplink {
 
-bool begin(const char* device_id) {
+bool begin(const char* device_id, const char* reset_reason) {
   deviceId = device_id;
+  resetReason = reset_reason;
   seq.begin();
   Serial.printf("[seq] resuming at %lu\n", static_cast<unsigned long>(seq.last()));
 
   for (const auto& s : SECRETS)
     if (strcmp(s.id, device_id) == 0) secret = s.secret;
+  char stored[80];
+  if (nvs::store().getStr(SECRET_KEY, stored, sizeof stored) && strlen(stored) == crypto::SIG_HEX_LEN &&
+      strspn(stored, "0123456789abcdef") == crypto::SIG_HEX_LEN) {
+    strcpy(rotatedSecret, stored);
+    secret = rotatedSecret;  // rotated over the air (S7): config.h still holds the old one
+    Serial.println("[cfg] using the rotated device secret from NVS");
+  }
   if (!selfTest()) {
     disabledNote = "HMAC FAIL - OFFLINE";
     return false;
@@ -225,7 +291,9 @@ void poll(uint32_t now_ms) {
   // BOOT needs a valid clock; it is sent (or buffered) as soon as there is one.
   if (bootPending && net::nowUnix() != 0) {
     bootPending = false;
-    event("BOOT", "{\"fw\":\"1.0.0\"}");
+    char data[48];
+    snprintf(data, sizeof data, "{\"fw\":\"1.0.0\",\"reset\":\"%s\"}", resetReason);
+    event("BOOT", data);
   }
 
   // Uplink = MQTT connected with a valid clock. A Wi-Fi outage and an unreachable broker look the same here.
@@ -252,12 +320,16 @@ void poll(uint32_t now_ms) {
 }
 
 void restartSync(char* detail, size_t cap) {
+  // Live-sent entries the server is missing go back into the offline buffer, in seq order, and sync from there.
+  const size_t replayed = replayRange ? recent.moveRangeTo(buffer, replayFrom, replayTo)
+                                      : recent.moveRangeTo(buffer, 0, UINT32_MAX);
+  replayRange = false;
   syncer.restart();
   if (buffer.empty()) {
     snprintf(detail, cap, "nothing buffered");
   } else {
-    snprintf(detail, cap, "resync from seq %lu (%u buffered)", static_cast<unsigned long>(buffer.at(0).seq),
-             static_cast<unsigned>(buffer.size()));
+    snprintf(detail, cap, "resync from seq %lu (%u buffered, %u replayed)", static_cast<unsigned long>(buffer.at(0).seq),
+             static_cast<unsigned>(buffer.size()), static_cast<unsigned>(replayed));
   }
 }
 
@@ -305,6 +377,8 @@ void printStatus() {
                 static_cast<unsigned long>(buffer.dropped()), syncer.waiting() ? "waiting" : "idle",
                 static_cast<unsigned long>(syncer.retries()), static_cast<unsigned long>(syncer.ackedUpTo()),
                 static_cast<unsigned long>(rejected), static_cast<unsigned long>(rejectedAcks));
+  Serial.printf("replay     %u / %u live-sent entries kept for SYNC_REQUEST\n", static_cast<unsigned>(recent.size()),
+                static_cast<unsigned>(RingBuffer::CAPACITY));
 }
 
 }  // namespace uplink

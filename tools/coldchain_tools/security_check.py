@@ -7,7 +7,7 @@ Static: npm audit (backend, frontend, production dependencies), pip-audit when i
 the working tree AND the whole git history, and the ignore rules for .env / config.h / databases.
 Live (own stack on spare ports): security headers, CORS, login and public-endpoint rate limits, SQL injection
 on every list endpoint's query parameters, stored XSS payloads, JWT forgery (role edit, alg none, wrong key,
-expired), and the public batch endpoint's field whitelist.
+expired), the public batch endpoint's field whitelist, and the per-device broker ACL.
 
 Each run rewrites the results block in docs/SECURITY.md (skip with --no-doc).
 """
@@ -20,14 +20,16 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .contracts import ROOT, setting
-from .stack import IS_WIN, Stack, python
+from .stack import EMAILS, IS_WIN, Stack, python
 
 RESULTS: list[tuple[str, str, str]] = []
 
@@ -125,6 +127,8 @@ def ignore_rules() -> None:
         "firmware/fridge-node/include/config.h",
         "backend/data/coldchain.db",
         "ml/data/raw/x.csv.gz",
+        "infra/mosquitto/passwd.prod",
+        "infra/mosquitto/certs/server.key",
     ]
     out = run(["git", "check-ignore", *must], ROOT).stdout.split()
     missing = [m for m in must if m not in out]
@@ -264,6 +268,39 @@ def live(stack: Stack) -> None:
         f"fields {sorted(keys)}; unknown and malformed both {s1}/{s2}, identical body {b1 == b2}",
     )
 
+    # browser session (S1): HttpOnly + SameSite=Strict cookie, no token in the body; a cookie write from
+    # another origin is refused (CSRF)
+    req = urllib.request.Request(
+        f"{api}/api/auth/login",
+        data=json.dumps({"email": EMAILS["ADMIN"], "password": stack.passwords["ADMIN"]}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as res:
+        cookie = next(
+            (v for k, v in res.headers.items() if k.lower() == "set-cookie" and "cc_session=" in v), ""
+        )
+        login_body = json.loads(res.read())
+    flags_ok = "HttpOnly" in cookie and "SameSite=Strict" in cookie and "token" not in login_body
+    session = cookie.split(";")[0]
+    forged = urllib.request.Request(
+        f"{api}/api/batches/1",
+        data=json.dumps({"quantity": 1}).encode(),
+        headers={"Content-Type": "application/json", "Cookie": session, "Origin": "https://evil.example"},
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(forged) as res:
+            csrf = res.status
+    except urllib.error.HTTPError as err:
+        csrf = err.code
+    record(
+        "PASS" if flags_ok and csrf == 403 else "FAIL",
+        "session cookie and CSRF",
+        f"cookie {'HttpOnly, SameSite=Strict' if flags_ok else repr(cookie[:60])}; "
+        f"token in body: {'token' in login_body}; cross-origin cookie write -> {csrf}",
+    )
+
     # rate limits
     codes = [
         stack.call("POST", "/api/auth/login", None, {"email": "nobody@x.io", "password": "wrong-password-1"})[
@@ -306,7 +343,51 @@ def write_doc(ran_live: bool) -> None:
         end,
     ]
     before, after = text.split(start)[0], text.split(end)[1]
-    DOC.write_text(before + "\n".join(lines) + after, encoding="utf-8")
+    with DOC.open("w", encoding="utf-8", newline="\n") as f:  # LF on Windows too (.gitattributes eol=lf)
+        f.write(before + "\n".join(lines) + after)
+
+
+def broker_acl(stack: Stack) -> None:
+    """With per-account ACLs, fridge-01's account can neither speak as fridge-02 nor read its commands."""
+    import paho.mqtt.client as mqtt
+
+    u = urlparse(stack.mqtt_url)
+
+    def connect(account: str):
+        c = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id=f"acl-probe-{account}-{secrets.token_hex(3)}"
+        )
+        c.username_pw_set(*stack.mqtt_auth(account))
+        c.connect(u.hostname, u.port, keepalive=10)
+        c.loop_start()
+        return c
+
+    received: list[str] = []
+    spy = connect("backend")  # may read every device's uplink
+    spy.on_message = lambda _c, _u, m: received.append(m.topic)
+    spy.subscribe(f"{stack.prefix}/+/telemetry", qos=1)
+    refused: list[bool] = []
+    snoop = connect("fridge-01")
+    snoop.on_subscribe = lambda _c, _u, _mid, codes, _p=None: refused.append(codes[0].is_failure)
+    time.sleep(1)
+    snoop.subscribe(f"{stack.prefix}/fridge-02/cmd", qos=1)
+    device = connect("fridge-01")
+    own, forged = f"{stack.prefix}/fridge-01/telemetry", f"{stack.prefix}/fridge-02/telemetry"
+    device.publish(own, "acl-probe", qos=0)  # control: its own topic goes through
+    time.sleep(0.5)
+    device.publish(forged, "acl-probe", qos=0)  # another device's topic: the broker drops it
+    time.sleep(2)
+    for c in (spy, snoop, device):
+        c.loop_stop()
+        c.disconnect()
+    ok = own in received and forged not in received and refused == [True]
+    record(
+        "PASS" if ok else "FAIL",
+        "broker ACL per device",
+        f"own topic {'delivered' if own in received else 'MISSING'}; "
+        f"as fridge-02 {'DELIVERED' if forged in received else 'dropped'}; "
+        f"subscribe to fridge-02/cmd {'refused' if refused == [True] else f'NOT refused {refused}'}",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -327,10 +408,12 @@ def main(argv: list[str] | None = None) -> int:
             mqtt_url="mqtt://127.0.0.1:18832",
             prefix="coldchain/v1/sec",
             logs=tmp,
+            acl=True,  # per-account broker ACLs, as in infra/mosquitto/acl
         )
         try:
             stack.up(hours=0)
             live(stack)
+            broker_acl(stack)
         finally:
             stack.down()
     if not args.no_doc:

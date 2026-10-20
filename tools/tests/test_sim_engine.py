@@ -9,6 +9,7 @@ import pytest
 
 from coldchain_tools.contracts import C, firmware_config, vectors
 from coldchain_tools.sim_engine import (
+    AJAR_K,
     SCENARIOS,
     CompressorControl,
     DoorAlarm,
@@ -18,6 +19,7 @@ from coldchain_tools.sim_engine import (
     RingBuffer,
     Syncer,
     ThermalModel,
+    apply_action,
     classify,
     event_json,
     reading_json,
@@ -77,6 +79,24 @@ def test_hysteresis_and_min_off_with_fake_clock():
         c.update(9.0, False, False, t)
         assert not c.on, "restarted inside the 60 s min-off"
     assert c.update(9.0, False, False, 62000)
+
+
+def test_boot_lock_holds_min_off_after_a_reboot_like_the_firmware():
+    c = CompressorControl()
+    c.boot_lock(1200)
+    for t in range(1200, 61200, 500):
+        assert not c.update(9.0, False, False, t), "started inside the boot lock"
+        assert c.waiting_min_off(t)
+    assert c.update(9.0, False, False, 61200)
+    # the virtual node boots on its first tick: a hot start waits 60 s too
+    node = FridgeNode("fridge-01", seed=3)
+    node.set_temp(9.0)
+    comp_on_at = None
+    for i in range(0, 90):
+        node.tick(i * 1000, 1.0, lambda: 1_800_000_000)
+        if node.comp.on and comp_on_at is None:
+            comp_on_at = i * 1000
+    assert comp_on_at == 60_000
 
 
 def test_forced_off_rearms_min_off():
@@ -171,6 +191,34 @@ def test_battery_and_door_alarm():
     a = DoorAlarm()
     assert not a.update(True, 0) and not a.update(True, 60_000) and a.update(True, 60_001)
     assert not a.update(True, 90_000) and not a.update(False, 90_100)
+
+
+def test_web_manual_controls_hold_power_and_ajar():
+    """The web app's manual controls (POST /api/fridges/:id/sim) reach the node through apply_action."""
+    node = FridgeNode("fridge-01", seed=3, boot_lock=False)
+    tick = lambda s: node.tick(s * 1000, 1.0 if s else 0.0, lambda: 1767225600 + s)  # noqa: E731
+    apply_action(node, "hold", 11.5)  # manual mode: the reading stays pinned while the model keeps running
+    msgs = [m for s in range(0, 12) for m in tick(s)]
+    last = [m.reading for m in msgs if m.kind == "telemetry"][-1]
+    assert last["temp"] == 11.5 and last["mode"] == "manual" and last["state"] == "BREACH"
+    apply_action(node, "hold", None)  # released: the model carries on from the held value, no jump
+    assert node.hold is None and node.model.temp == 11.5 and node.reading(False)["mode"] == "model"
+    apply_action(node, "hold", 9.0)
+    apply_action(node, "temp", 4.0)  # a one-off jump also releases the hold
+    assert node.hold is None and node.model.temp == 4.0
+
+    apply_action(node, "power", True)  # explicit, so a repeated click cannot flip it back
+    apply_action(node, "power", True)
+    assert node.battery_requested
+    apply_action(node, "power", False)
+    assert not node.battery_requested
+    apply_action(node, "power", None)  # scenarios and the CLI still toggle
+    assert node.battery_requested
+
+    apply_action(node, "ajar", True)
+    assert node.door_open and node.model.params["K_DOOR_PER_S"] == AJAR_K
+    apply_action(node, "door", False)  # a real close ends the ajar episode and restores the full door leak
+    assert not node.door_open and node.model.params["K_DOOR_PER_S"] != AJAR_K
 
 
 def test_node_emits_like_main_cpp():

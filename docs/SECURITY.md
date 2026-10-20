@@ -61,7 +61,7 @@ Attackers considered:
 
 - **RBAC is enforced on the server, deny by default.** Every route declares a permission. A test fails when a route has no example request and access rule, and checks every route × role (150 cases). Scenario S9 checks it again against a live server.
 - **Every request re-reads the role and the active flag from the database.** Disabling a user or changing their role takes effect at once. Logout revokes the token.
-- **JWTs** are HS256 with the algorithm pinned, so `none` and algorithm swaps are refused. They expire after 8 h. The secret is at least 32 random characters, checked at start-up.
+- **JWTs** are HS256 with the algorithm pinned, so `none` and algorithm swaps are refused. They expire after `JWT_EXPIRES_IN` (default 1 h). The secret is at least 32 random characters, checked at start-up.
 - **Input validation:**
   - every body, query and path parameter goes through a strict zod schema, and unknown fields are refused (no mass assignment of `role` or `password_hash`);
   - passwords are bcrypt (cost 12) and need 10+ characters from three classes;
@@ -81,6 +81,8 @@ Attackers considered:
 - **Web security headers:** helmet sets a Content-Security-Policy, HSTS, `X-Content-Type-Options`, frame denial and Referrer-Policy. `X-Powered-By` is off.
 - **Untrusted text:** React escapes it. The report's markdown renders without raw HTML. A stored XSS payload is shown as text (tested).
 - **Logs** carry request ids, never passwords, tokens or secrets.
+- **Error tracking** (optional, D4) is off without a DSN. Events are scrubbed of tokens, cookies, emails and secrets before they leave, and carry no request bodies.
+- **ML model files** are pickles. The service loads them only from `ml/models`, and only when each one matches the SHA-256 recorded in `model_card.json` at training time.
 
 ### Injection
 
@@ -90,12 +92,12 @@ Attackers considered:
 ## What is not protected
 
 - **Confidentiality on a public broker.** HMAC protects integrity and authenticity, not secrecy: on `broker.hivemq.com` anyone can read the readings. Use the TLS HiveMQ Cloud cluster or local Mosquitto with accounts for anything real.
-- **A stolen device secret.** Whoever has it can sign data for that one device. To recover, rotate the secret: re-seed the device row and update `config.h`.
+- **A stolen device secret.** Whoever has it can sign data for that one device until it is rotated. An Admin rotates it over the air (`POST /api/devices/:id/rotate-secret`, S7): the new secret travels sealed under the old one, and the old one is refused once the node switches. A thief who still holds the old secret and sees that command can unseal the new one too, so after a real leak re-seed the device by hand (`config.h` and the device row).
 - **An attacker with the database file and the anchors.** The chain shows edits. A full rewrite is caught only while the off-box anchors stay out of the attacker's reach.
-- **TLS for the web app** is the deployment's job: put the backend behind a reverse proxy with HTTPS. `trust proxy` is set for loopback.
-- **Token theft by XSS.** The session token lives in `sessionStorage` to keep the app simple, with XSS mitigated by React escaping and the CSP. A cookie-based session would remove that class.
+- **TLS for the web app** is the deployment's job. `infra/docker-compose.prod.yml` puts Caddy (automatic HTTPS) in front; set `TRUST_PROXY` to match the proxy (default `loopback`).
+- **Actions by XSS.** The session is an HttpOnly, SameSite=Strict cookie (S1), so a script cannot steal the token. Script running in the app's own origin could still act as the signed-in user while the page is open; React escaping and the CSP are the defence.
 - **Physical tampering** with the sensor, and denial of service beyond the rate limits.
-- **Readings sent while the backend is down.** The devices publish with QoS 0 (PubSubClient), so the broker does not keep them. The device buffer covers broker and Wi-Fi outages, not a backend outage. The gap is detected and its exposure is counted conservatively. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+- **Readings sent while the backend is down** are recovered, within limits. The devices publish with QoS 0 (PubSubClient), so the broker does not keep them, but each node keeps its recently sent readings and replays a range on `SYNC_REQUEST` (R1). The backend asks for the gap after a restart. A gap longer than that window is detected, and its exposure is counted conservatively.
 
 ## Latest automated check
 

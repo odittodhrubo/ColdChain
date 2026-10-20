@@ -25,6 +25,20 @@ function sign(secret, fields) {
   return crypto.createHmac('sha256', Buffer.from(secret, 'utf8')).update(signingString(fields), 'utf8').digest('hex');
 }
 
+// ROTATE_SECRET (S7): the new secret travels under a one-time pad derived from the old one, then a tag.
+//   pad = HMAC(old, "coldchain-rotate-pad|" + nonce)   32 bytes, used once (fresh nonce every rotation)
+//   ct  = hex(bytes(new) XOR pad)                       the new secret is 64 hex chars = 32 bytes
+//   tag = HMAC(old, "coldchain-rotate-tag|" + nonce + "|" + ct)
+// Key = UTF-8 bytes of the old secret string, as for envelope signatures.
+function rotateSeal(oldSecret, newSecret, nonce) {
+  const key = Buffer.from(oldSecret, 'utf8');
+  const pad = crypto.createHmac('sha256', key).update(`coldchain-rotate-pad|${nonce}`, 'utf8').digest();
+  const plain = Buffer.from(newSecret, 'hex');
+  const ct = Buffer.from(plain.map((b, i) => b ^ pad[i])).toString('hex');
+  const tag = crypto.createHmac('sha256', key).update(`coldchain-rotate-tag|${nonce}|${ct}`, 'utf8').digest('hex');
+  return { ct, tag };
+}
+
 function classify(temp, door, power, sensorFault) {
   if (sensorFault || temp > C.SAFE_MAX_C || temp < C.SAFE_MIN_C) return 'BREACH';
   if ((temp > C.WARN_HIGH_C && temp <= C.SAFE_MAX_C) || (temp >= C.SAFE_MIN_C && temp < C.WARN_LOW_C)) return 'WARNING';
@@ -150,6 +164,10 @@ const vectors = {
     const w = weightedSeconds(samples);
     return { name, samples, expected_weighted_s: w, expected_remaining_pct: Number(remainingPct(w).toFixed(4)) };
   }),
+  rotate: [
+    [testSecret(11), testSecret(12), '0123456789abcdef0123456789abcdef'],
+    [testSecret(13), testSecret(14), 'ffeeddccbbaa99887766554433221100'],
+  ].map(([old_secret, new_secret, nonce]) => ({ old_secret, new_secret, nonce, ...rotateSeal(old_secret, new_secret, nonce) })),
 };
 
 // ---- self-check against values stated in the spec ----
@@ -157,6 +175,8 @@ const vectors = {
 assert.equal(vectors.hmac.length, 5);
 assert.equal(vectors.status.length, 12);
 assert.equal(vectors.exposure.length, 8);
+assert.equal(vectors.rotate.length, 2);
+for (const v of vectors.rotate) assert.notEqual(v.ct, v.new_secret); // never in clear
 assert.equal(classify(8.0, 0, 'MAINS', false), 'WARNING');
 assert.equal(classify(8.01, 0, 'MAINS', false), 'BREACH');
 assert.equal(classify(2.0, 0, 'MAINS', false), 'WARNING');
@@ -236,6 +256,24 @@ const header = [
   ),
   '};',
   'constexpr size_t EXPOSURE_COUNT = sizeof(EXPOSURE) / sizeof(EXPOSURE[0]);',
+  '',
+  '// ROTATE_SECRET args: the new secret sealed under the old one (S7).',
+  'struct RotateVector {',
+  '  const char* old_secret;',
+  '  const char* new_secret;',
+  '  const char* nonce;',
+  '  const char* ct;',
+  '  const char* tag;',
+  '};',
+  '',
+  'constexpr RotateVector ROTATE[] = {',
+  ...vectors.rotate.map((v) => `    {"${v.old_secret}",
+     "${v.new_secret}",
+     "${v.nonce}",
+     "${v.ct}",
+     "${v.tag}"},`),
+  '};',
+  'constexpr size_t ROTATE_COUNT = sizeof(ROTATE) / sizeof(ROTATE[0]);',
   '',
   '}  // namespace vectors',
   '',

@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { logger } from './logger';
+import type { AppContext } from './http';
 
 /** Every error response is {error:{code,message,details?}}. */
 export class HttpError extends Error {
@@ -37,6 +38,11 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   }
   if (!(err instanceof HttpError)) {
     logger.error({ err, reqId: req.id }, 'unhandled error');
+    (req.app.locals.ctx as AppContext | undefined)?.reportError(err, {
+      reqId: String(req.id),
+      route: (req.route as { path?: string } | undefined)?.path,
+      method: req.method,
+    });
     err = new HttpError(500, 'INTERNAL', 'Internal server error');
   }
   const { status, code, message, details } = err as HttpError;

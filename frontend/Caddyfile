@@ -1,0 +1,25 @@
+# SITE_ADDRESS: your domain (coldchain.example.org: Caddy gets and renews the certificate) or localhost (an internal
+# self-signed one). The QR codes encode PUBLIC_BASE_URL, which must be https://<the same address>.
+{$SITE_ADDRESS:localhost} {
+	encode gzip
+
+	# the API and the realtime socket go to the backend; Caddy adds X-Forwarded-For (backend TRUST_PROXY)
+	handle /api/* {
+		reverse_proxy backend:4000
+	}
+	handle /socket.io/* {
+		reverse_proxy backend:4000
+	}
+
+	# the single-page app: hashed assets cached for a year, everything else (index.html) never cached
+	handle {
+		root * /srv
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		header -Server
+		try_files {path} /index.html
+		file_server
+	}
+	@app not path /assets/* /api/*
+	header @app Cache-Control "no-store"
+}

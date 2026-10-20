@@ -23,6 +23,7 @@ constexpr uint32_t NONCE_TTL_S = 120;
 constexpr uint32_t FORECAST_HORIZON_MIN = 30;
 constexpr uint32_t GAP_CONSERVATIVE_S = 15;
 constexpr uint32_t ENVELOPE_VERSION = 1;
+constexpr float CALIBRATION_MAX_C = 2.0f;
 
 constexpr const char* TOPIC_TELEMETRY = "{prefix}/{device_id}/telemetry";
 constexpr const char* TOPIC_EVENT = "{prefix}/{device_id}/event";

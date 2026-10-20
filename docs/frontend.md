@@ -1,6 +1,6 @@
 # Frontend
 
-React 18 + Vite + TypeScript + Tailwind CSS v4, React Router, TanStack Query, socket.io-client, lucide-react. Product context lives in [`PRODUCT.md`](../PRODUCT.md) and the visual system in [`DESIGN.md`](../DESIGN.md).
+React 18 + Vite + TypeScript + Tailwind CSS v4, React Router 7 (`react-router`), TanStack Query, socket.io-client, lucide-react. Product context lives in [`PRODUCT.md`](../PRODUCT.md) and the visual system in [`DESIGN.md`](../DESIGN.md).
 
 ```
 src/
@@ -33,7 +33,8 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 
 ## Auth
 
-- `POST /api/auth/login` returns `{token, expiresAt, user}`. The token lives in memory, mirrored to **`sessionStorage`** (this tab only), never `localStorage`.
+- `POST /api/auth/login` sets the session as an **HttpOnly cookie** (S1) and returns `{expiresAt, user, mustChangePassword, totpEnabled, mfaSetupRequired}`; no script on the page ever sees the token. Requests send it with `credentials: 'same-origin'`, and the browser's `Origin` header passes the server's CSRF check. Only the signed-in user and `expiresAt` are kept in `sessionStorage`, to restore the UI on reload.
+- With two-factor sign-in on, login answers `mfaRequired` and the page asks for the 6-digit code or a recovery code (`POST /api/auth/totp/verify`). A forced password change or a required TOTP setup sends the user to `/account/required`; `/account` is the voluntary page (password, two-factor).
 - Any 401 on an authenticated call, or reaching `expiresAt`, ends the session (once, even when several requests fail together) and the user is told. Sign-out calls `POST /api/auth/logout` so the server revokes the token, and clears the query cache.
 - `GET /api/auth/me` refreshes the role on load, so a demotion shows in the UI as well as on the server.
 - Route guards (`RequireAuth`, `RequirePermission`) and the role-aware navigation mirror the server's matrix (`auth/permissions.ts`). Hiding is not authorisation: pages still render a friendly no-permission state for a server 403 (`ErrorState`).
@@ -41,7 +42,7 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
 ## Data and realtime
 
 - `api<T>()` normalises every failure to `ApiError {status, code, message, details}` (`status 0` = server unreachable). Queries pass TanStack's `AbortSignal`, so leaving a page cancels its requests. 4xx responses are never retried; network errors and 5xx retry twice.
-- `RealtimeProvider` opens **one** Socket.IO connection per session, authenticated with the JWT (`io({auth: {token}})`), and opens it again whenever the token changes. Pages never subscribe themselves: `realtime/merge.ts` applies `fridge:update`, `fridge:latch`, `batch:update`, `alert:new`, `alert:update`, `prediction:update`, `relocation:update` and `security:event` to the query cache.
+- `RealtimeProvider` opens **one** Socket.IO connection per session, authenticated by the same cookie (`withCredentials`), and opens it again whenever the session changes. Pages never subscribe themselves: `realtime/merge.ts` applies `fridge:update`, `fridge:latch`, `batch:update`, `alert:new`, `alert:update`, `prediction:update`, `relocation:update` and `security:event` to the query cache.
 - When the socket is down the provider refetches the live queries every 5 s, and the top bar shows **Polling every 5 s** (glyph + word) instead of **Live**.
 
 ## Shell
@@ -100,6 +101,16 @@ Light and dark themes share the tokens (`:root` / `.dark`); the theme follows th
   - The run starts the real ML service (`e2e/ml-server.mjs`, port 8310) and runs the scheduler every 5 s (`ML_INTERVAL_MS`).
   - `e2e/feed_readings.py` writes 3 h of weak-compressor history plus live readings into the e2e database. It stands in for the nodes, so no broker is needed.
   - The test checks that health drops, a plan appears, the Pharmacist confirms, and inventory shows the batches in Fridge B.
+
+## Errors (D4)
+
+`ui/ErrorBoundary.tsx` wraps the whole app: a render crash shows "This screen stopped working" with a **Reload page** button instead of a blank page. With `VITE_ERROR_DSN` set at build time (a Sentry or GlitchTip DSN), `lib/errorReport.ts` sends render crashes, window errors and unhandled rejections as Sentry envelopes, at most 30 a minute. Tokens, emails, the session cookie and 64-hex secrets are scrubbed before sending. Without the variable nothing is sent.
+
+## Installable app and push notifications (P7)
+
+`public/manifest.webmanifest` and `public/sw.js` make the dashboard installable on a phone or desktop. The service worker caches **only** the static shell (network-first for `index.html`, cache-first for hashed assets); it never touches `/api` or `/socket.io`, so no authenticated data is ever stored. It is registered in production only (`main.tsx`), so Vite's HMR is never intercepted.
+
+Web Push delivers a **BREACH** or a 5-minute **DOOR** alert to the device even with the tab closed. It is off unless the backend has a VAPID key pair (`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`; generate with `npx web-push generate-vapid-keys`). On the **Account** page, "Notifications" asks permission and subscribes this browser (`lib/push.ts` → `POST /api/push/subscribe`). The alert engine pushes to every subscription on a CRITICAL alert (`modules/push/service.ts`) and prunes any endpoint the push service reports as gone (404/410). The service worker's `push` handler shows the notification; `notificationclick` focuses or opens the dashboard.
 
 ## Development
 

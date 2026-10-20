@@ -60,7 +60,9 @@ Outputs: `ml/models/{forecast,health}.joblib` and `model_card.json`; `ml/reports
   - When no compressor data exists, the score is `insufficient` (NaN, band `UNKNOWN`).
   - Bands: 80–100 `GOOD`, 50–79 `WEAKENING`, 0–49 `FAILING`.
   - The weakening flag is set when health < 70 or the 24 h trend is below −5 points/day.
-- **Serving** (`modeling/predict.py`): `load()` reads only `ml/models`. It refuses a feature list that differs from `features.py`. `Forecaster.predict(X)` and `HealthModel.score(X)` take the vectors from `features.py`.
+- **Serving** (`modeling/predict.py`): `load()` reads only `ml/models`.
+  - It first checks each `.joblib` against the SHA-256 in `model_card.json` (`files`, written by `train.py`). A changed byte, or a card without hashes, means nothing is unpickled: `/health` reports `degraded`, and the backend's rule-based fallback answers.
+  - It refuses a feature list that differs from `features.py`. `Forecaster.predict(X)` and `HealthModel.score(X)` take the vectors from `features.py`.
 - **Evaluation**, on the test split only:
   - forecast MAE / RMSE / R² for every model and baseline;
   - error by horizon and by condition (door open, power failure);
@@ -105,3 +107,23 @@ Tests (`ml/tests/test_service.py`) run on simulator scenarios (the firmware's ph
 - the report endpoints work.
 
 The dataset includes the firmware's own nominal fridge (`firmware-nominal`), so a healthy virtual node scores GOOD.
+
+## Live forecast scoring (A1)
+
+Every 30-minute forecast is scored against what really happened. The backend job `forecast-scoring` (every 5 min) finds the reading nearest `created_at + 30 min` for each unscored model prediction and stores `actual_temp` and `abs_error` on the `ml_predictions` row. From these it shows a rolling 24 h mean absolute error per fridge on the AI Report page (`GET /api/ml/accuracy`), next to the offline test MAE (`FORECAST_TEST_MAE`, default 0.66 °C). When the live 6 h error stays above `FORECAST_DRIFT_FACTOR` × the test MAE (default 2×) with enough samples, it raises a `FORECAST_DRIFT` INFO alert — the "retrain the model" signal.
+
+## Retraining on real data (A2)
+
+The shipped models are trained on synthetic data (see [`adr/0005`](adr/0005-synthetic-training-data.md)). Retrain monthly once real readings accumulate:
+
+1. **Export** real readings in the training schema: `cd ml && python -m data.export_live` (writes to `ml/data`).
+2. **Merge** with the synthetic dataset — keep the synthetic rows for the rare events real data lacks (power cuts, faults).
+3. **Train**: `make train` (writes `ml/models/*.joblib`, `ml/models/model_card.json`, and `ml/reports`).
+4. **Compare** against the current model on a held-out *real* week; promote only if its forecast MAE and breach recall are at least as good.
+5. **Version**: before promoting, copy the current models aside as `forecast-YYYY-MM.joblib` / `health-YYYY-MM.joblib`. `model_card.json` records `trained_at` (the version the service reports as `model_version` on every prediction and stores on each `ml_predictions` row) and the SHA-256 of each file. **Rollback** is one step: copy a dated pair back over `forecast.joblib` / `health.joblib` and restore its `model_card.json`, then restart the service.
+
+The procedure is validated end to end by running `make train` on the exported demo readings merged with the synthetic set, then confirming `GET /api/ml/report` shows the new `trained_at` and predictions carry the new `model_version`.
+
+## Ambient temperature (A3)
+
+An optional second DS18B20 outside the fridge reports room temperature. It flows end to end today: the firmware sends `ambient` in the telemetry body only when a second probe is on the bus (so single-sensor nodes and Wokwi never send it), the backend validates it (`mqtt/schemas.ts`, nullable) and stores it in `readings.ambient`. It is **not** yet a model input: adding `ambient` to `FEATURES` requires retraining on data that actually contains it, so it becomes a forecast/health feature as part of a hardware retrain (add it in `ml/features.py`, re-run step 3 above). On Wokwi it adds nothing.

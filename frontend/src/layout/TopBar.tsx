@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Loader2, LogOut, Monitor, Moon, Radio, RefreshCw, Sun } from 'lucide-react';
+import { ChevronDown, Loader2, LogOut, Moon, Radio, RefreshCw, Sun, UserCog } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
 import { ROLE_LABEL } from '../auth/permissions';
+import { useT } from '../i18n';
+import { LanguageToggle } from '../i18n/LanguageToggle';
 import { api } from '../lib/api';
 import { useConnection } from '../realtime/RealtimeProvider';
 import { useTheme, type ThemeChoice } from '../theme/ThemeProvider';
@@ -16,6 +18,7 @@ interface Page {
 
 /** Global state of the cold room in one pill: all clear, or how many alerts are open and how severe. */
 function StatusPill() {
+  const { t } = useT();
   const { data } = useQuery({
     queryKey: ['alerts', 'summary'],
     queryFn: async ({ signal }) => {
@@ -30,11 +33,11 @@ function StatusPill() {
   const status = data.critical > 0 ? 'BREACH' : data.active > 0 ? 'WARNING' : 'SAFE';
   const text =
     data.active === 0
-      ? 'All fridges safe'
+      ? t('topbar.allSafe')
       : `${data.active} open alert${data.active === 1 ? '' : 's'}${data.critical ? `, ${data.critical} critical` : ''}`;
   const short =
     data.active === 0
-      ? 'All safe'
+      ? t('topbar.allSafe')
       : `${data.active} alert${data.active === 1 ? '' : 's'}${data.critical ? ` · ${data.critical} crit.` : ''}`;
   const ink = status === 'SAFE' ? 'var(--safe)' : status === 'WARNING' ? 'var(--warning)' : 'var(--breach)';
   return (
@@ -76,26 +79,28 @@ const CONNECTION = {
 } as const;
 
 function ConnectionIndicator() {
-  const c = CONNECTION[useConnection()];
+  const { t } = useT();
+  const state = useConnection();
+  const c = CONNECTION[state];
   const Icon = c.icon;
   // a distinct glyph per state, so the state never rests on colour alone (the word joins it from sm up)
   return (
     <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2" title={c.help}>
       <Icon aria-hidden className="size-4" style={{ color: c.ink }} />
-      <span className="sr-only sm:not-sr-only">{c.label}</span>
+      <span className="sr-only sm:not-sr-only">{t(`conn.${state}`)}</span>
     </span>
   );
 }
 
-const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
-  { value: 'system', label: 'System theme', icon: Monitor },
-  { value: 'light', label: 'Light theme', icon: Sun },
-  { value: 'dark', label: 'Dark theme', icon: Moon },
+const THEMES: { value: ThemeChoice; labelKey: 'theme.light' | 'theme.dark'; icon: typeof Sun }[] = [
+  { value: 'light', labelKey: 'theme.light', icon: Sun },
+  { value: 'dark', labelKey: 'theme.dark', icon: Moon },
 ];
 
 function ThemeToggle() {
+  const { t } = useT();
   const { choice, setChoice } = useTheme();
-  const i = THEMES.findIndex((t) => t.value === choice);
+  const i = THEMES.findIndex((th) => th.value === choice);
   const current = THEMES[i];
   const nextTheme = THEMES[(i + 1) % THEMES.length];
   const Icon = current.icon;
@@ -103,8 +108,8 @@ function ThemeToggle() {
     <button
       type="button"
       onClick={() => setChoice(nextTheme.value)}
-      aria-label={`${current.label}. Switch to ${nextTheme.label.toLowerCase()}`}
-      title={current.label}
+      aria-label={`${t(current.labelKey)}. Switch to ${t(nextTheme.labelKey).toLowerCase()}`}
+      title={t(current.labelKey)}
       className="grid size-10 cursor-pointer place-items-center rounded-md text-ink-2 hover:bg-panel-2 hover:text-ink"
     >
       <Icon aria-hidden className="size-[18px]" />
@@ -113,6 +118,7 @@ function ThemeToggle() {
 }
 
 function UserMenu() {
+  const { t } = useT();
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -164,6 +170,15 @@ function UserMenu() {
             <p className="text-sm text-ink-2">{user.email}</p>
             <p className="mt-1 text-xs font-semibold text-teal-strong">{ROLE_LABEL[user.role]}</p>
           </div>
+          <Link
+            to="/account"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-sm font-medium text-ink hover:bg-panel-2"
+          >
+            <UserCog aria-hidden className="size-4" />
+            {t('menu.account')}
+          </Link>
           <button
             type="button"
             role="menuitem"
@@ -171,7 +186,7 @@ function UserMenu() {
             className="mt-1 flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md px-3 text-sm font-medium text-ink hover:bg-panel-2"
           >
             <LogOut aria-hidden className="size-4" />
-            Sign out
+            {t('menu.signout')}
           </button>
         </div>
       )}
@@ -181,7 +196,7 @@ function UserMenu() {
 
 export function TopBar() {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-rule bg-panel px-4 lg:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-rule bg-panel px-4 lg:px-6 print:hidden">
       {/* phones give this width to the status pill; the bottom bar and login carry the brand there */}
       <span className="hidden sm:inline lg:hidden">
         <Logo compact />
@@ -189,6 +204,7 @@ export function TopBar() {
       <StatusPill />
       <div className="ml-auto flex items-center gap-1 sm:gap-3">
         <ConnectionIndicator />
+        <LanguageToggle className="hidden sm:inline-flex" />
         <ThemeToggle />
         <UserMenu />
       </div>

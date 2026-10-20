@@ -24,7 +24,8 @@ static_assert(sizeof(BufEntry) == 16, "BufEntry must stay 16 bytes");
 
 namespace bufflag {
 constexpr uint8_t DOOR = 1 << 0, COMP = 1 << 1, BATTERY = 1 << 2, LATCH = 1 << 3, MANUAL = 1 << 4,
-                  REASON_DOOR = 1 << 5, EVENT = 1 << 6;
+                  REASON_DOOR = 1 << 5, EVENT = 1 << 6,
+                  SENT = 1 << 7;  // went out in a sync chunk: only such entries may be freed by an ack
 }
 
 // Event types (contract section 5) in a fixed order; the index is stored in BufEntry::code.
@@ -48,7 +49,17 @@ class RingBuffer {
   bool empty() const { return count_ == 0; }
   const BufEntry& at(size_t i) const { return items_[(head_ + i) % CAPACITY]; }  // 0 = oldest
   size_t freeUpTo(uint32_t seq);  // drop entries with seq <= seq (after an ack); returns how many
+  // After an ack: drop entries with seq <= seq that went out in a chunk (SENT). An older entry replayed into
+  // the buffer after that chunk was sent survives the ack and goes out in the next chunk.
+  size_t freeSentUpTo(uint32_t seq);
+  void markSent(size_t n);  // the first n entries went out in a chunk
   uint32_t dropped() const { return dropped_; }
+
+  // R1 (retain until acknowledged): the uplink keeps live-sent entries in a second RingBuffer, a rolling
+  // replay window. A SYNC_REQUEST {from_seq,to_seq} for a gap the server found moves the matching entries
+  // from that window into the offline buffer, which then syncs them like any buffered data.
+  bool insertSorted(const BufEntry& e);  // keeps seq order; false (nothing stored) when full; a duplicate seq is a no-op
+  size_t moveRangeTo(RingBuffer& dst, uint32_t from_seq, uint32_t to_seq);  // returns how many moved
 
  private:
   BufEntry items_[CAPACITY];

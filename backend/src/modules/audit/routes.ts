@@ -4,6 +4,17 @@ import { AUDIT_EVENTS, verifyChain, type AuditRow, type VerifyResult } from './c
 
 const intParam = z.coerce.number().int();
 const flag = z.enum(['1', 'true', '0', 'false']).transform((v) => v === '1' || v === 'true');
+// Escape the SQL LIKE wildcards so a typed % or _ is matched literally (ESCAPE '\' on the query).
+const like = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** A row edited outside the app may no longer hold JSON: list it as raw text (that is the evidence), never 500. */
+function entryView(r: AuditRow) {
+  try {
+    return { ...r, payload: JSON.parse(r.payload) as unknown };
+  } catch {
+    return { ...r, payload: r.payload, payload_invalid: true };
+  }
+}
 
 export function auditRoutes(): RouteDef[] {
   return [
@@ -25,8 +36,10 @@ export function auditRoutes(): RouteDef[] {
         const conditions = (
           [
             ['event_type = ?', query.type],
-            ['actor = ?', query.actor],
-            ["json_extract(payload, '$.batch_id') = ?", query.batch_id],
+            // substring, case-insensitive: "user" or "1" both find "user:1", so a partial actor still matches
+            ['actor LIKE ? ESCAPE \'\\\'', query.actor ? `%${like(query.actor)}%` : undefined],
+            // json_valid first: json_extract raises on a payload that was edited into non-JSON
+            ["json_valid(payload) AND json_extract(payload, '$.batch_id') = ?", query.batch_id],
             ['ts >= ?', query.from],
             ['ts <= ?', query.to],
           ] as const
@@ -41,7 +54,7 @@ export function auditRoutes(): RouteDef[] {
           .prepare(`SELECT * FROM audit_log ${filter} ORDER BY id DESC LIMIT ? OFFSET ?`)
           .all(...args, query.pageSize, (query.page - 1) * query.pageSize) as AuditRow[];
         return {
-          entries: rows.map((r) => ({ ...r, payload: JSON.parse(r.payload) })),
+          entries: rows.map(entryView),
           page: query.page,
           pageSize: query.pageSize,
           total,

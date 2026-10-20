@@ -27,6 +27,11 @@ void fillReading(JsonObject o, const Reading& r, const LiveExtras* live) {
     snprintf(temp, sizeof temp, "%.2f", r.temp);  // fixed 2 decimals, no float-printing surprises
     o["temp"] = serialized(static_cast<char*>(temp));  // char* (not const char*) makes ArduinoJson copy it
   }
+  if (!isnan(r.ambient)) {  // A3: only when a second sensor is fitted; absent otherwise (unchanged body)
+    char amb[12];
+    snprintf(amb, sizeof amb, "%.2f", r.ambient);
+    o["ambient"] = serialized(static_cast<char*>(amb));
+  }
   o["door"] = r.doorOpen ? 1 : 0;
   o["comp"] = r.compOn ? 1 : 0;
   o["power"] = r.onBattery ? "BATTERY" : "MAINS";

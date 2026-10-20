@@ -52,6 +52,7 @@ Reading unpackReading(const BufEntry& e) {
   r.latch = e.flags & bufflag::LATCH;
   r.manualMode = e.flags & bufflag::MANUAL;
   r.doorReason = e.flags & bufflag::REASON_DOOR;
+  r.ambient = NAN;  // A3: ambient is live-only; the compact buffer entry does not store it
   return r;
 }
 
@@ -63,6 +64,49 @@ void RingBuffer::push(const BufEntry& e) {
   }
   items_[(head_ + count_) % CAPACITY] = e;
   count_++;
+}
+
+bool RingBuffer::insertSorted(const BufEntry& e) {
+  size_t pos = count_;  // first entry with a higher seq: insert before it (usually the end)
+  while (pos > 0 && at(pos - 1).seq > e.seq) pos--;
+  if (pos > 0 && at(pos - 1).seq == e.seq) return true;  // already here
+  if (count_ == CAPACITY) return false;                  // never overwrite pending data to make room
+  for (size_t i = count_; i > pos; i--) items_[(head_ + i) % CAPACITY] = items_[(head_ + i - 1) % CAPACITY];
+  items_[(head_ + pos) % CAPACITY] = e;
+  count_++;
+  return true;
+}
+
+size_t RingBuffer::moveRangeTo(RingBuffer& dst, uint32_t from_seq, uint32_t to_seq) {
+  size_t kept = 0, moved = 0;
+  for (size_t i = 0; i < count_; i++) {  // compacts in place: kept <= i, so nothing unread is overwritten
+    const BufEntry e = items_[(head_ + i) % CAPACITY];
+    if (e.seq >= from_seq && e.seq <= to_seq && dst.insertSorted(e)) {
+      moved++;
+      continue;
+    }
+    items_[(head_ + kept) % CAPACITY] = e;  // outside the range, or no room in dst: stays here
+    kept++;
+  }
+  count_ = kept;
+  return moved;
+}
+
+size_t RingBuffer::freeSentUpTo(uint32_t seq) {
+  size_t kept = 0;
+  for (size_t i = 0; i < count_; i++) {
+    const BufEntry e = items_[(head_ + i) % CAPACITY];
+    if ((e.flags & bufflag::SENT) && e.seq <= seq) continue;  // acknowledged: freed
+    items_[(head_ + kept) % CAPACITY] = e;
+    kept++;
+  }
+  const size_t freed = count_ - kept;
+  count_ = kept;
+  return freed;
+}
+
+void RingBuffer::markSent(size_t n) {
+  for (size_t i = 0; i < n && i < count_; i++) items_[(head_ + i) % CAPACITY].flags |= bufflag::SENT;
 }
 
 size_t RingBuffer::freeUpTo(uint32_t seq) {

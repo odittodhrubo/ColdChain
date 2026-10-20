@@ -2,6 +2,8 @@
 node_modules/
 dist/
 coverage/
+.coverage
+coverage.xml
 .vite/
 *.tsbuildinfo
 
@@ -55,3 +57,7 @@ tools/.state/
 # Playwright
 frontend/test-results/
 frontend/playwright-report/
+
+# production broker secrets (infra/docker-compose.prod.yml): never committed
+infra/mosquitto/passwd.prod
+infra/mosquitto/certs/

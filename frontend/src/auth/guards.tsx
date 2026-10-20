@@ -1,14 +1,19 @@
 import type { ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router';
 import { NoPermissionPage } from '../pages/NoPermissionPage';
 import { useAuth } from './AuthProvider';
 import { can, type Permission } from './permissions';
 
-/** Signed-out visitors go to the login page, which brings them back afterwards. */
+/**
+ * Signed-out visitors go to the login page, which brings them back afterwards. A user who must change their
+ * password or set up two-factor first goes to the account gate (the server refuses everything else anyway).
+ */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, mustChangePassword, mfaSetupRequired } = useAuth();
   const location = useLocation();
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  const from = { from: location.pathname + location.search };
+  if (!user) return <Navigate to="/login" replace state={from} />;
+  if (mustChangePassword || mfaSetupRequired) return <Navigate to="/account/required" replace state={from} />;
   return <>{children}</>;
 }
 

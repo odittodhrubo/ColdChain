@@ -1,0 +1,14 @@
+{
+  "name": "ColdChain",
+  "short_name": "ColdChain",
+  "description": "Vaccine cold-chain monitoring: live fridge status, alerts and heat-budget tracking.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef2f6",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" }
+  ]
+}

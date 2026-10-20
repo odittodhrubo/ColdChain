@@ -80,3 +80,35 @@ def verify(
     except ValueError:
         return "BAD_BODY", env
     return "OK", env
+
+
+# ---------------------------------------------------------------- ROTATE_SECRET (S7)
+# The new secret sealed under the old one, exactly as tools/gen_vectors.js rotateSeal and the firmware's
+# crypto::rotateOpen: pad = HMAC(old, "coldchain-rotate-pad|" + nonce), ct = hex(bytes(new) XOR pad),
+# tag = HMAC(old, "coldchain-rotate-tag|" + nonce + "|" + ct). Key = UTF-8 bytes of the old secret string.
+
+
+def _mac(key: str, msg: str) -> bytes:
+    return hmac.new(key.encode(), msg.encode(), hashlib.sha256).digest()
+
+
+def rotate_seal(old_secret: str, new_secret: str, nonce: str) -> tuple[str, str]:
+    pad = _mac(old_secret, f"coldchain-rotate-pad|{nonce}")
+    ct = bytes(a ^ b for a, b in zip(bytes.fromhex(new_secret), pad, strict=True)).hex()
+    return ct, _mac(old_secret, f"coldchain-rotate-tag|{nonce}|{ct}").hex()
+
+
+def rotate_open(old_secret: str, nonce: str, ct: str, tag: str) -> str | None:
+    """The new 64-hex secret, or None for a wrong tag or malformed input (the tag is checked first)."""
+    if not (isinstance(nonce, str) and isinstance(ct, str) and isinstance(tag, str)):
+        return None
+    if len(nonce) != 32 or len(ct) != 64 or len(tag) != 64:
+        return None
+    try:
+        cipher = bytes.fromhex(ct)
+    except ValueError:
+        return None
+    if not hmac.compare_digest(_mac(old_secret, f"coldchain-rotate-tag|{nonce}|{ct}").hex(), tag):
+        return None
+    pad = _mac(old_secret, f"coldchain-rotate-pad|{nonce}")
+    return bytes(a ^ b for a, b in zip(cipher, pad, strict=True)).hex()

@@ -7,7 +7,13 @@ import type { DeviceRegistry } from './devices';
 import { buildEnvelope } from './envelope';
 
 export type Publish = (topic: string, payload: string) => void;
-export type CommandType = 'RESET_LATCH' | 'SET_LATCH' | 'BUZZER_TEST' | 'SYNC_REQUEST';
+export type CommandType =
+  | 'RESET_LATCH'
+  | 'SET_LATCH'
+  | 'BUZZER_TEST'
+  | 'SYNC_REQUEST'
+  | 'ROTATE_SECRET'
+  | 'SET_CALIBRATION';
 
 export const topicFor = (prefix: string, deviceId: string, kind: keyof typeof TOPICS) =>
   TOPICS[kind].replace('{prefix}', prefix).replace('{device_id}', deviceId);

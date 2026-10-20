@@ -37,7 +37,16 @@ from data.generate import PROFILES, START_TS, load_raw, schedule
 from features import FEATURES, HEALTH_FEATURES, WINDOW_MIN, Minutes, features_at
 from modeling import metrics as M
 from modeling.baselines import BASELINES
-from modeling.predict import MODELS, Forecaster, HealthModel, rule_level, trend_per_day, weakening
+from modeling.predict import (
+    MODEL_FILES,
+    MODELS,
+    Forecaster,
+    HealthModel,
+    file_sha256,
+    rule_level,
+    trend_per_day,
+    weakening,
+)
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -508,6 +517,8 @@ def main() -> None:
     card = {
         "trained_at": trained_at,
         "seed": SEED,
+        # checked by modeling.predict.load before anything is unpickled
+        "files": {name: file_sha256(MODELS / name) for name in MODEL_FILES},
         "versions": {
             "python": platform.python_version(),
             "scikit-learn": sklearn.__version__,

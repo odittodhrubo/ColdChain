@@ -35,4 +35,12 @@ void signEnvelope(const char* secret, const char* device_id, const char* kind, u
 // Constant-time comparison of two NUL-terminated strings of equal expected length.
 bool constTimeEqual(const char* a, const char* b);
 
+// ROTATE_SECRET (S7): the new secret sealed under the old one (tools/gen_vectors.js rotateSeal):
+//   pad = HMAC(old, "coldchain-rotate-pad|" + nonce), ct = hex(bytes(new) XOR pad),
+//   tag = HMAC(old, "coldchain-rotate-tag|" + nonce + "|" + ct).
+// Checks the tag first (constant time), then removes the pad. Writes the 64-hex new secret and returns true,
+// or false for a wrong tag or malformed input (nothing is written).
+bool rotateOpen(const char* old_secret, const char* nonce, const char* ct_hex, const char* tag_hex,
+                char out_secret[SIG_HEX_LEN + 1]);
+
 }  // namespace crypto

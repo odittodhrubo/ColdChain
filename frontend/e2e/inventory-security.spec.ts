@@ -58,7 +58,10 @@ test('inspector sees no add or move buttons, and the API refuses the write too',
   await expect(page.getByRole('button', { name: 'Add batch' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Move / })).toHaveCount(0);
 
-  const login = await request.post('/api/auth/login', { data: E2E_INSPECTOR });
+  const login = await request.post('/api/auth/login', {
+    data: E2E_INSPECTOR,
+    headers: { 'X-Auth-Mode': 'token' },
+  });
   const { token } = (await login.json()) as { token: string };
   const res = await request.post('/api/batches', {
     headers: { Authorization: `Bearer ${token}` },

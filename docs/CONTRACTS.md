@@ -85,12 +85,12 @@ All topics except `status`:
 
 ## 5. Message bodies
 
-- **telemetry:** `{"seq":int,"ts":int,"temp":float,"door":0|1,"comp":0|1,"power":"MAINS"|"BATTERY","batt":int,"state":"SAFE|WARNING|BREACH","exp_s":int,"latch":0|1,"mode":"model|manual","buf":int,"rssi":int,"fw":"1.0.0","reason":"periodic|door"}`
+- **telemetry:** `{"seq":int,"ts":int,"temp":float,"door":0|1,"comp":0|1,"power":"MAINS"|"BATTERY","batt":int,"state":"SAFE|WARNING|BREACH","exp_s":int,"latch":0|1,"mode":"model|manual","buf":int,"rssi":int,"fw":"1.0.0","reason":"periodic|door"}`. Optional `"ambient":float` (A3) is included only by a node with a second DS18B20 outside the fridge; it is absent otherwise, so it never changes existing signatures.
 - **event:** `{"seq":int,"ts":int,"type":"DOOR_OPEN|DOOR_CLOSE|DOOR_ALARM|POWER_FAIL|POWER_RESTORE|BATT_LOW|COMP_ON|COMP_OFF|LATCH_SET|LATCH_RESET|WIFI_LOST|WIFI_BACK|SENSOR_FAULT|BOOT","data":{}}`
 - **telemetry** may also carry `"dropped":int` (readings lost to an offline-buffer overflow). It is present only when > 0.
 - **sync:** `{"from_seq":int,"to_seq":int,"readings":[<telemetry body without "buf","rssi","fw">...]}`, ordered oldest → newest, at most `SYNC_CHUNK` items. Events raised while offline share the same seq counter, so they travel in the same array as event bodies (`{"seq","ts","type","data":{}}`, recognised by the `type` key; buffered events keep type, seq and ts, not `data`). `from_seq`/`to_seq` are the first and last item's seq.
 - **ack** (server → device): `{"seq_upto":int}` = highest contiguous seq stored. After storing every item of a chunk (duplicates ignored via `UNIQUE(device_id, seq)`), the server acks at least that chunk's `to_seq`, idempotently: a resent chunk gets the same ack again, never an error. "Contiguous" is counted from the chunk's `from_seq`. The device holds nothing older, and seqs inside `[from_seq, to_seq]` that are not in the chunk were sent live, not buffered. Past `to_seq` the ack advances only through seqs actually stored. So an ack never covers data the device still holds and the server lacks, and a reboot seq jump or a lost live message can never stall the sync. The device frees buffered items with `seq <= seq_upto`, never earlier, and ignores an ack below its oldest buffered seq. Acks are signed with the device secret and verified like commands (timestamp window, HMAC, nonce).
-- **cmd** (server → device): `{"cmd_id":"uuid","type":"RESET_LATCH|SET_LATCH|BUZZER_TEST|SYNC_REQUEST","args":{}}`
+- **cmd** (server → device): `{"cmd_id":"uuid","type":"RESET_LATCH|SET_LATCH|BUZZER_TEST|SYNC_REQUEST|ROTATE_SECRET|SET_CALIBRATION","args":{}}`. `SYNC_REQUEST` names the seq gap the server found: `"args":{"from_seq":N,"to_seq":M}`. A node replays that range from its live-sent window; with no range it replays everything it kept. `SET_CALIBRATION` (P4) carries `"args":{"offset_c":N}`, bounded to ±`CALIBRATION_MAX_C`; the node stores it in NVS and applies it to the DS18B20 reading before `classify()`.
 - **cmdack:** `{"cmd_id":"uuid","ok":true,"detail":"..."}`
 - `seq` is one monotonically increasing counter per device across telemetry and events, persisted in NVS so it survives reboot.
 
@@ -125,14 +125,18 @@ Enforced **on the server**; the UI only mirrors it.
 | Capability | Admin | Pharmacist | Inspector |
 |---|:-:|:-:|:-:|
 | View dashboard, fridges, batches, alerts | ✔ | ✔ | ✔ |
+| Export temperature records (CSV / print) | ✔ | ✔ | ✔ |
 | Create/edit batches, move between fridges | ✔ | ✔ | ✘ |
 | Confirm relocation (one click) | ✔ | ✔ | ✘ |
 | Acknowledge alerts | ✔ | ✔ | ✘ |
 | Reset red latch / discard acknowledgement | ✔ | ✘ | ✘ |
-| Manage users | ✔ | ✘ | ✘ |
+| Manage users and display screens | ✔ | ✘ | ✘ |
+| Rotate device secret / set sensor calibration | ✔ | ✘ | ✘ |
 | View security events and audit log | ✔ | ✔ (read) | ✔ (read) |
 | Run **Verify Integrity** | ✔ | ✔ | ✔ |
 | Public QR check | no login needed | | |
+
+A fourth role, **DISPLAY** (P1), is not a person: it is a long-lived, read-only wall-screen token created on the Users page. It may only read the dashboard (`dashboard:read`) and is refused every write by the matrix above.
 
 ## 9. Hardware pin map
 

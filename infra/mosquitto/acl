@@ -1,0 +1,41 @@
+# Topic permissions for the local Mosquitto (S4). The same rules as backend/src/scripts/broker-acl.ts, which the
+# dev broker and `make security` test. Topics: {MQTT_TOPIC_PREFIX}/{device_id}/{kind}.
+# This file assumes the default prefix coldchain/v1: with another MQTT_TOPIC_PREFIX, edit every line.
+# Anonymous clients get nothing (allow_anonymous false in mosquitto.conf).
+
+# The backend reads every device's uplink and sends commands and sync acks.
+user backend
+topic read coldchain/v1/+/telemetry
+topic read coldchain/v1/+/event
+topic read coldchain/v1/+/sync
+topic read coldchain/v1/+/cmdack
+topic read coldchain/v1/+/status
+topic write coldchain/v1/+/cmd
+topic write coldchain/v1/+/ack
+
+# Dev/test tools only (virtual node, attack demos): may inject any device's uplink, never commands. It stands for
+# a leaked broker credential, so the backend's HMAC / timestamp / nonce checks are still exercised. Not in prod.
+user coldchain
+topic write coldchain/v1/+/telemetry
+topic write coldchain/v1/+/event
+topic write coldchain/v1/+/sync
+topic write coldchain/v1/+/cmdack
+topic write coldchain/v1/+/status
+topic read coldchain/v1/+/cmd
+topic read coldchain/v1/+/ack
+topic read coldchain/v1/+/status
+
+# Container healthcheck (docker-compose.yml): a liveness probe publishes to its own topic. This image does
+# not deliver $SYS to clients, so the probe publishes rather than reading broker stats.
+user healthcheck
+topic write coldchain/v1/healthcheck/ping
+
+# Every device account (username = device id, e.g. fridge-01): its own topics only. %u is the username, so
+# fridge-01 can never publish as fridge-02 or read fridge-02's commands.
+pattern write coldchain/v1/%u/telemetry
+pattern write coldchain/v1/%u/event
+pattern write coldchain/v1/%u/sync
+pattern write coldchain/v1/%u/cmdack
+pattern write coldchain/v1/%u/status
+pattern read coldchain/v1/%u/cmd
+pattern read coldchain/v1/%u/ack

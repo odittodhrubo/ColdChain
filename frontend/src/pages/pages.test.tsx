@@ -104,6 +104,7 @@ function inventory(role: Role, batches: Batch[]) {
     'GET /api/auth/me': { status: 200, body: { user: { id: 1, email: 'x', name: 'Test', role } } },
     'GET /api/fridges': { status: 200, body: { fridges: [fridge], server_time: Date.now(), demoScale: 1 } },
     'GET /api/batches': { status: 200, body: { batches, total: batches.length, demoScale: 1 } },
+    'DELETE /api/batches/': { status: 200, body: { deleted: true } },
   });
   renderApp('/inventory');
 }
@@ -134,11 +135,64 @@ describe('inventory: what each role can do', () => {
     inventory('ADMIN', [batch({ status: 'DISCARD', remaining_pct: 0, discarded_at: 1 })]);
     const row = (await screen.findByText('Measles-Rubella')).closest('tr')!;
     expect(within(row).getByText('Disposal required')).toBeInTheDocument();
-    expect(within(row).getByRole('link', { name: 'Acknowledge disposal' })).toHaveAttribute(
-      'href',
-      '/fridges/fridge-01',
-    );
     expect(within(row).queryByRole('button', { name: /^Move/ })).toBeNull();
+    expect(within(row).getByRole('button', { name: /^Remove/ })).toBeInTheDocument(); // admin can remove any row
+    // acknowledged right here: the fridge's reset dialog opens in place
+    await userEvent.click(within(row).getByRole('button', { name: 'Acknowledge disposal' }));
+    expect(screen.getByRole('dialog', { name: /Reset the discard latch on/ })).toBeInTheDocument();
+  });
+
+  it('a pharmacist sees "Disposal required" but cannot acknowledge or remove', async () => {
+    inventory('PHARMACIST', [batch({ status: 'DISCARD', remaining_pct: 0, discarded_at: 1 })]);
+    const row = (await screen.findByText('Measles-Rubella')).closest('tr')!;
+    expect(within(row).getByText('Disposal required')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /Acknowledge|^Remove/ })).toBeNull();
+  });
+
+  it('an Admin removes a disposed batch from the inventory', async () => {
+    const disposed = batch({ status: 'DISCARD', remaining_pct: 0, discarded_at: 1, acknowledged_at: 2 });
+    inventory('ADMIN', [disposed]);
+    const row = (await screen.findByText('Measles-Rubella')).closest('tr')!;
+    expect(within(row).getByText('Disposal acknowledged')).toBeInTheDocument();
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Remove Measles-Rubella from the inventory' }),
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Remove Measles-Rubella (MR-1) from the inventory?' });
+    expect(dialog).toHaveTextContent('QR code keeps showing Discard');
+    const confirm = within(dialog).getByRole('button', { name: 'Remove batch' });
+    expect(confirm).toBeDisabled(); // a reason is required
+    await userEvent.type(
+      within(dialog).getByLabelText('Reason (recorded in the audit log)'),
+      'disposed per SOP',
+    );
+    await userEvent.click(confirm);
+    expect(await screen.findByText('Measles-Rubella removed from the inventory')).toBeInTheDocument();
+    const del = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.find(
+      ([, init]) => init?.method === 'DELETE',
+    );
+    expect(del?.[0]).toBe('/api/batches/7');
+    expect(JSON.parse((del![1].body as string) ?? '{}')).toEqual({ reason: 'disposed per SOP' });
+  });
+
+  it('a pharmacist cannot delete a live batch', async () => {
+    inventory('PHARMACIST', [batch()]);
+    const row = (await screen.findByText('Measles-Rubella')).closest('tr')!;
+    expect(within(row).queryByRole('button', { name: /^Remove/ })).toBeNull();
+  });
+
+  it('an Admin can delete any batch with a reason', async () => {
+    inventory('ADMIN', [batch()]);
+    const row = (await screen.findByText('Measles-Rubella')).closest('tr')!;
+    await userEvent.click(
+      within(row).getByRole('button', { name: 'Remove Measles-Rubella from the inventory' }),
+    );
+    const dialog = screen.getByRole('dialog');
+    await userEvent.type(
+      within(dialog).getByLabelText('Reason (recorded in the audit log)'),
+      'duplicate entry',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove batch' }));
+    expect(await screen.findByText('Measles-Rubella removed from the inventory')).toBeInTheDocument();
   });
 
   it('batch text is rendered as text, never as markup (stored XSS)', async () => {
@@ -155,6 +209,79 @@ describe('inventory: what each role can do', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add batch' }));
     expect(within(dialog).getByText('Enter the product name')).toBeInTheDocument();
     expect(within(dialog).getByText('Choose a fridge')).toBeInTheDocument();
+  });
+});
+
+describe('inventory: pagination', () => {
+  // 40 batches named B01..B40, so the default sort (budget left, all equal) keeps the server order
+  const many = Array.from({ length: 40 }, (_, i) =>
+    batch({ id: i + 1, name: `B${String(i + 1).padStart(2, '0')}`, lot_number: `L-${i + 1}` }),
+  );
+  const bodyRows = (root: HTMLElement) => within(root).getAllByRole('row').slice(1);
+
+  it('shows 15 batches per page, steps through, and a new filter returns to page 1', async () => {
+    inventory('INSPECTOR', many);
+    await screen.findByText('B01');
+    const table = screen.getByRole('table', { name: 'Vaccine batches' });
+    expect(bodyRows(table)).toHaveLength(15);
+    expect(screen.getByText('1–15 of 40')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('31–40 of 40')).toBeInTheDocument();
+    expect(bodyRows(screen.getByRole('table', { name: 'Vaccine batches' }))).toHaveLength(10);
+    await userEvent.click(screen.getByLabelText(/expiring/i));
+    expect(await screen.findByText('1–15 of 40')).toBeInTheDocument();
+  });
+
+  it('View all lists every batch in a dialog, with the row actions still there', async () => {
+    inventory('PHARMACIST', many);
+    await screen.findByText('B01');
+    await userEvent.click(screen.getByRole('button', { name: 'View all (40)' }));
+    const dialog = screen.getByRole('dialog', { name: 'Inventory: all 40' });
+    expect(bodyRows(within(dialog).getByRole('table'))).toHaveLength(40);
+    expect(within(dialog).getByRole('button', { name: 'Edit B40' })).toBeInTheDocument();
+  });
+});
+
+describe('alerts: Previous / Next paging', () => {
+  const alert = (id: number) => ({
+    id,
+    type: 'FRIDGE_OFFLINE',
+    severity: 'WARNING',
+    fridge_id: 'fridge-01',
+    batch_id: null,
+    data: { title: `Alert ${id}` },
+    delivery_status: {},
+    created_at: 1_700_000_000_000 + id,
+    status: 'RESOLVED',
+  });
+
+  it('asks the server for the next page and back, within the 15-per-page window', async () => {
+    signIn('INSPECTOR');
+    const { calls } = mockApi({
+      ...DEFAULT_ROUTES,
+      'GET /api/auth/me': {
+        status: 200,
+        body: { user: { id: 1, email: 'x', name: 'T', role: 'INSPECTOR' } },
+      },
+      'GET /api/fridges': { status: 200, body: { fridges: [fridge], server_time: Date.now(), demoScale: 1 } },
+      'GET /api/alerts': ({ url }) => {
+        const page = Number(new URL(url, 'http://x').searchParams.get('page') ?? '1');
+        const all = Array.from({ length: 16 }, (_, i) => alert(i + 1));
+        return { status: 200, body: { alerts: all.slice((page - 1) * 15, page * 15), total: 16 } };
+      },
+    });
+    renderApp('/alerts');
+    expect(await screen.findByText('Alert 1')).toBeInTheDocument();
+    expect(screen.getByText('1–15 of 16')).toBeInTheDocument();
+    const prev = screen.getByRole('button', { name: 'Previous' });
+    expect(prev).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Alert 16')).toBeInTheDocument();
+    expect(screen.getByText('16–16 of 16')).toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes('page=2'))).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByText('Alert 1')).toBeInTheDocument();
   });
 });
 
@@ -186,6 +313,98 @@ describe('users: password rule matches the server', () => {
     ['Lowercase12', null],
     ['lower-case-12', null],
   ])('%s', (pw, problem) => expect(passwordProblem(pw)).toBe(problem));
+});
+
+describe('audit log: 20 per page, Previous / Next', () => {
+  const entry = (id: number) => ({
+    id,
+    ts: 1_700_000_000_000 + id,
+    actor: 'system',
+    event_type: 'DEVICE_EVENT',
+    payload: { seq: id },
+    prev_hash: `p${id}`,
+    hash: `h${id}`,
+  });
+
+  it('asks the server for 20 at a time and steps forward and back', async () => {
+    signIn('INSPECTOR');
+    const all = Array.from({ length: 25 }, (_, i) => entry(25 - i)); // newest first
+    const { calls } = mockApi({
+      ...DEFAULT_ROUTES,
+      'GET /api/auth/me': {
+        status: 200,
+        body: { user: { id: 1, email: 'x', name: 'T', role: 'INSPECTOR' } },
+      },
+      'GET /api/audit': ({ url }) => {
+        const u = new URL(url, 'http://x');
+        expect(u.searchParams.get('pageSize')).toBe('20');
+        const page = Number(u.searchParams.get('page') ?? '1');
+        return { status: 200, body: { entries: all.slice((page - 1) * 20, page * 20), total: 25 } };
+      },
+    });
+    renderApp('/audit');
+    expect(await screen.findByText('1–20 of 25')).toBeInTheDocument();
+    expect(screen.getByRole('table')).toHaveTextContent('DEVICE_EVENT');
+    const prev = screen.getByRole('button', { name: 'Previous' });
+    expect(prev).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('21–25 of 25')).toBeInTheDocument();
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes('page=2'))).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByText('1–20 of 25')).toBeInTheDocument();
+  });
+});
+
+describe('audit log: row details', () => {
+  const entry = (o = {}) => ({
+    id: 42,
+    ts: 1_700_000_000_000,
+    actor: 'user:1',
+    event_type: 'DISCARD_ACK',
+    payload: { fridge_id: 'fridge-02', batch_ids: [10], reason: 'vials destroyed' },
+    prev_hash: 'a'.repeat(64),
+    hash: 'b'.repeat(64),
+    ...o,
+  });
+
+  it('opens a record and shows its full payload and hashes', async () => {
+    signIn('INSPECTOR');
+    mockApi({
+      ...DEFAULT_ROUTES,
+      'GET /api/auth/me': {
+        status: 200,
+        body: { user: { id: 1, email: 'x', name: 'T', role: 'INSPECTOR' } },
+      },
+      'GET /api/audit': { status: 200, body: { entries: [entry()], total: 1 } },
+    });
+    renderApp('/audit');
+    await userEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = screen.getByRole('dialog', { name: 'Audit record #42' });
+    expect(within(dialog).getByText('DISCARD_ACK')).toBeInTheDocument();
+    expect(within(dialog).getByText(/vials destroyed/)).toBeInTheDocument();
+    expect(within(dialog).getByText('b'.repeat(64))).toBeInTheDocument();
+  });
+
+  it('shows a tampered (non-JSON) payload as raw text with a warning', async () => {
+    signIn('INSPECTOR');
+    mockApi({
+      ...DEFAULT_ROUTES,
+      'GET /api/auth/me': {
+        status: 200,
+        body: { user: { id: 1, email: 'x', name: 'T', role: 'INSPECTOR' } },
+      },
+      'GET /api/audit': {
+        status: 200,
+        body: { entries: [entry({ payload: '{"x":1} [tampered]', payload_invalid: true })], total: 1 },
+      },
+    });
+    renderApp('/audit');
+    await userEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/not valid JSON/)).toBeInTheDocument();
+    expect(within(dialog).getByText('{"x":1} [tampered]')).toBeInTheDocument();
+  });
 });
 
 describe('audit: Verify Integrity stream', () => {

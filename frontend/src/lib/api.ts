@@ -25,19 +25,19 @@ export interface ApiOptions {
   auth?: boolean; // default true
 }
 
-/** Typed fetch wrapper: JSON in and out, bearer token, normalised errors. */
+/** Typed fetch wrapper: JSON in and out, the session cookie (same origin), normalised errors. */
 export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { method = 'GET', body, signal, auth = true } = opts;
-  const token = auth ? session.get()?.token : undefined;
+  const signedIn = auth && session.get() !== null;
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       signal,
+      credentials: 'same-origin', // the HttpOnly session cookie; the browser adds Origin, which the server checks
       headers: {
         Accept: 'application/json',
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -56,7 +56,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
       data?.error?.message ?? res.statusText ?? 'Request failed',
       data?.error?.details,
     );
-    if (res.status === 401 && token) onUnauthorized?.(err);
+    if (res.status === 401 && signedIn) onUnauthorized?.(err);
     throw err;
   }
   return data as T;

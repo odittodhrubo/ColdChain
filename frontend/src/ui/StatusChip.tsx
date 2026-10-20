@@ -1,3 +1,4 @@
+import { useT } from '../i18n';
 import { STATUS, type Status } from './status';
 import { VvmMark } from './VvmMark';
 
@@ -13,6 +14,7 @@ export function StatusChip({
   size?: 'sm' | 'md';
   className?: string;
 }) {
+  const { t } = useT();
   const meta = STATUS[status];
   return (
     <span
@@ -27,7 +29,7 @@ export function StatusChip({
       title={meta.description}
     >
       <VvmMark status={status} used={used} size={size === 'sm' ? 13 : 15} />
-      {meta.label}
+      {t(`status.${status}`)}
     </span>
   );
 }

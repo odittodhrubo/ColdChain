@@ -13,6 +13,14 @@ class CompressorControl {
   // Returns true when the compressor state changed on this call.
   bool update(float temp, bool sensor_fault, bool force_off, uint32_t now_ms);
 
+  // Call once at boot. A reboot is an OFF the controller never saw (the relay de-energises): no start for
+  // COMP_MIN_OFF_S after it, so a watchdog reset or brownout mid-cycle cannot short-cycle the compressor.
+  // Without it (the native tests, the ML data generator) boot counts the min-off as already satisfied.
+  void bootLock(uint32_t now_ms) {
+    boot_locked_ = true;
+    boot_at_ms_ = now_ms;
+  }
+
   bool on() const { return on_; }
   // True when the min-off rule is what keeps the compressor off (shown on the console).
   bool waitingMinOff(uint32_t now_ms) const { return !on_ && !minOffElapsed(now_ms); }
@@ -24,4 +32,6 @@ class CompressorControl {
   bool on_ = false;
   bool has_switched_off_ = false;  // false at boot: the min-off timer counts as already satisfied
   uint32_t changed_at_ms_ = 0;     // time of the last ON or OFF transition
+  bool boot_locked_ = false;       // bootLock() was called and its 60 s have not passed yet
+  uint32_t boot_at_ms_ = 0;
 };

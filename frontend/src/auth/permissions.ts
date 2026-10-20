@@ -19,6 +19,7 @@ export const PERMISSIONS = {
   'audit:read': ALL,
   'audit:verify': ALL,
   'metrics:read': ['ADMIN', 'INSPECTOR'],
+  'device:manage': ['ADMIN'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

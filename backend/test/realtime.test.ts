@@ -26,7 +26,7 @@ async function start() {
     sockets.push(s);
     return s;
   };
-  return { t, ctx, client };
+  return { t, ctx, client, url };
 }
 
 describe('Socket.IO realtime', () => {
@@ -51,5 +51,24 @@ describe('Socket.IO realtime', () => {
       const err = await new Promise<Error>((resolve) => client(token).on('connect_error', resolve));
       expect(err.message).toBe('unauthorized');
     }
+  });
+
+  it('accepts the session cookie from the app origin only (S1)', async () => {
+    const { t, url } = await start();
+    const { token } = signToken(await addUser(t, 'INSPECTOR'), t.config);
+    const withCookie = (origin: string) => {
+      const s = connect(url, {
+        transports: ['websocket'],
+        reconnection: false,
+        extraHeaders: { Cookie: `cc_session=${token}`, Origin: origin },
+      });
+      sockets.push(s);
+      return new Promise<string>((resolve) => {
+        s.on('connect', () => resolve('connected'));
+        s.on('connect_error', (e) => resolve(e.message));
+      });
+    };
+    expect(await withCookie(new URL(t.config.CORS_ORIGIN).origin)).toBe('connected');
+    expect(await withCookie('https://evil.example')).toBe('unauthorized');
   });
 });

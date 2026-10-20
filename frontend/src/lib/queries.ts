@@ -24,6 +24,7 @@ export function useFridge(id: string) {
         fridge: Fridge;
         events: DeviceEvent[];
         readings: ReadingRow[];
+        sim_controls?: boolean;
         server_time: number;
       }>(`/api/fridges/${encodeURIComponent(id)}`, { signal });
       setServerTime(res.server_time);

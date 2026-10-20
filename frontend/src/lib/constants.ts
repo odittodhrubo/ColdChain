@@ -19,6 +19,7 @@ export const NONCE_TTL_S = 120;
 export const FORECAST_HORIZON_MIN = 30;
 export const GAP_CONSERVATIVE_S = 15;
 export const ENVELOPE_VERSION = 1;
+export const CALIBRATION_MAX_C = 2.0;
 
 export const TOPICS = {
   telemetry: '{prefix}/{device_id}/telemetry',

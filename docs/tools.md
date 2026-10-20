@@ -1,6 +1,6 @@
 # Developer tools: virtual node, attack and tamper scripts
 
-Python package `coldchain_tools` (in `tools/`, Python 3.11+, `paho-mqtt`). Install it once into the repo venv:
+Python package `coldchain_tools` (in `tools/`, Python 3.12+, `paho-mqtt`). Install it once into the repo venv:
 
 ```bash
 .venv/Scripts/python -m pip install -e "tools[dev]"     # bin/ instead of Scripts/ on macOS / Linux
@@ -108,9 +108,20 @@ It prints each server check in order (parse + fields, known device, timestamp wi
 - a `NodeRunner` per fridge whose Wokwi node is not online. A `NodeRunner` is the virtual node's node, uplink and transport, driven by a thread.
 
 `stack demo` (`make demo`):
-- resets `DB_PATH` and runs `backend/src/scripts/demo-seed.ts` (users, fridges, eight batches in varied states);
-- backfills 6 h of seeded history;
+- resets `DB_PATH` and runs `backend/src/scripts/demo-seed.ts` (users, fridges, ten batches, five per fridge, in varied states; the Discard batch latches fridge-02, and its node gets `SET_LATCH` once it connects);
+- backfills 6 h of seeded history (`--hours`);
+- `--weak fridge-02=0.4` simulates a weak compressor in the history and in the virtual node, as scenario S10 does: health ≈ 36 and a relocation plan within about 2 minutes (at `DEMO_TIME_SCALE=1`);
 - prints the credentials and QR URLs.
+
+`coldchain_tools.preflight` (`make preflight`, about 10 s) is the demo-day check before each take:
+- `.env` present;
+- clock skew against an internet `Date` header: PASS ≤ 3 s, WARN ≤ 10 s, FAIL beyond;
+- the broker with the backend's credentials, and both nodes' retained `online` status;
+- backend `/api/ready`, the ML service and its model files;
+- `DEMO_TIME_SCALE` (`--expect-scale 20`);
+- the fresh-demo state: only fridge-02 latched; 8 batches incl. one At Risk and one Discard.
+
+`--prove-rbac` signs in as the Inspector and tries to move a batch: the server answers 403 (video shot 11).
 
 `coldchain_tools.scenarios` (`make scenarios`, about 15 min; `--full` uses the spec's durations and adds the door-ajar lead time, about 45 min):
 - It brings up its own stack on spare ports with a throwaway database and `DEMO_TIME_SCALE=60`, and drives virtual nodes.

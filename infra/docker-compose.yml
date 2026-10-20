@@ -1,24 +1,34 @@
 # Dev stack: `make up` (or `npm run up`) from the repo root. Requires ../.env (`npm run env:init`).
 # Wokwi nodes cannot reach this local broker; they use the cloud broker in MQTT_URL.
-# Local Mosquitto serves the virtual node and tests: set MQTT_URL=mqtt://mosquitto:1883 in .env to use it.
+# To use this Mosquitto from the backend, set in .env:
+#   MQTT_URL=mqtt://mosquitto:1883  MQTT_USERNAME=backend  MQTT_PASSWORD=backend-dev-only
+# Accounts and topic rules: mosquitto/passwd.dev (dev-only passwords) and mosquitto/acl.
+# Production (TLS, built images, no source mounts): docker-compose.prod.yml.
 name: coldchain
 
 services:
   mosquitto:
     image: eclipse-mosquitto:2
+    restart: unless-stopped
     ports:
       - '1883:1883'
     volumes:
       - ./mosquitto:/mosquitto/config-src:ro
+      - mosquitto-data:/mosquitto/data # persistent sessions survive a broker restart
     # mosquitto 2 needs a hashed password file; hash the dev-only plaintext copy at start.
     command: >
       sh -c "cp /mosquitto/config-src/passwd.dev /mosquitto/config/passwd &&
              mosquitto_passwd -U /mosquitto/config/passwd &&
-             chown mosquitto:mosquitto /mosquitto/config/passwd && chmod 0700 /mosquitto/config/passwd &&
+             chown mosquitto:mosquitto /mosquitto/config/passwd /mosquitto/data && chmod 0700 /mosquitto/config/passwd &&
              exec mosquitto -c /mosquitto/config-src/mosquitto.conf"
+    healthcheck:
+      test: ['CMD-SHELL', 'mosquitto_pub -h localhost -u healthcheck -P healthcheck-dev-only -t coldchain/v1/healthcheck/ping -m 1 > /dev/null']
+      interval: 10s
+      retries: 5
 
   backend:
     build: ../backend
+    restart: unless-stopped
     env_file: ../.env
     environment:
       ML_URL: http://ml:8000
@@ -29,14 +39,19 @@ services:
       - /app/node_modules
       - ../contracts:/contracts:ro
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
+      ml:
+        condition: service_healthy
     healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # readiness: the database and the broker connection (GET /api/ready); /api/health is liveness only
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       retries: 5
 
   ml:
     build: ../ml
+    restart: unless-stopped
     ports:
       - '127.0.0.1:8000:8000' # backend only (no CORS); localhost for debugging
     volumes:
@@ -48,6 +63,7 @@ services:
 
   frontend:
     build: ../frontend
+    restart: unless-stopped
     environment:
       VITE_PROXY_TARGET: http://backend:4000
     ports:
@@ -56,4 +72,9 @@ services:
       - ../frontend:/app
       - /app/node_modules
     depends_on:
-      - backend
+      backend:
+        # started, not healthy: with the broker unreachable the UI still shows the backend's own state
+        condition: service_started
+
+volumes:
+  mosquitto-data:

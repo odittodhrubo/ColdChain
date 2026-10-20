@@ -53,6 +53,9 @@ export function forwardFill(rows: MinuteRow[], max = FILL_MAX_MIN): MinuteRow[] 
 
 export class MlEngine {
   predict: PredictFn;
+  /** Unix ms of the last answer from the ML service, and of the last rule-based fallback (readiness). */
+  lastModelAt = 0;
+  lastFallbackAt = 0;
   private running = false;
   private readonly streaks = new Map<string, Streak>();
   private readonly insert;
@@ -108,12 +111,14 @@ export class MlEngine {
         history_24h: history,
         health_history,
       });
+      this.lastModelAt = nowMs; // the service answered, even if it wants more data
       if (res.status !== 'ok') return; // the service wants more data: say nothing rather than guess
       prediction = res;
     } catch (err) {
       logger.warn({ fridgeId, err: (err as Error).message }, 'ML service unavailable: rule-based fallback');
       prediction = fallbackPrediction(window, history);
       source = 'fallback';
+      this.lastFallbackAt = nowMs;
     }
     const stored: StoredPrediction = {
       ...prediction,

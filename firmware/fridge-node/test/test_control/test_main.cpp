@@ -30,6 +30,36 @@ void test_boot_counts_min_off_as_satisfied() {
   TEST_ASSERT_TRUE(c.on());
 }
 
+void test_boot_lock_holds_the_min_off_after_a_reboot() {
+  CompressorControl c;
+  const uint32_t boot = 1200;  // millis() when setup() ends
+  c.bootLock(boot);
+  for (uint32_t t = boot; t < boot + MIN_OFF_MS; t += 500) {  // hot from the start, still must wait
+    TEST_ASSERT_FALSE_MESSAGE(c.update(9.0f, false, false, t), "started inside the boot lock");
+    TEST_ASSERT_TRUE(c.waitingMinOff(t));
+  }
+  TEST_ASSERT_TRUE(c.update(9.0f, false, false, boot + MIN_OFF_MS));
+}
+
+void test_boot_lock_never_rearms_after_millis_rollover() {
+  CompressorControl c;
+  c.bootLock(0);
+  TEST_ASSERT_TRUE(c.update(7.5f, false, false, MIN_OFF_MS));  // served: ON
+  TEST_ASSERT_TRUE(c.update(2.0f, false, false, MIN_OFF_MS + 1000));
+  // ~49.7 days later millis() has wrapped and now - boot_at is small again: only the normal min-off applies
+  const uint32_t wrapped = 10000;
+  TEST_ASSERT_TRUE(c.update(9.0f, false, false, MIN_OFF_MS + 1000 + MIN_OFF_MS));
+  TEST_ASSERT_TRUE(c.update(2.0f, false, false, 0xFFFFFFFFu - MIN_OFF_MS));
+  TEST_ASSERT_TRUE(c.update(9.0f, false, false, wrapped));  // 60 s after that OFF, across the wrap
+}
+
+void test_boot_lock_delays_the_sensor_fault_duty_by_60s_only() {
+  CompressorControl c;
+  c.bootLock(0);
+  TEST_ASSERT_FALSE(c.update(NAN, true, false, MIN_OFF_MS - 1));
+  TEST_ASSERT_TRUE(c.update(NAN, true, false, MIN_OFF_MS));  // never ran: duty starts ON, not after 10 min
+}
+
 void test_never_restarts_within_60s_of_off() {
   CompressorControl c;
   c.update(7.0f, false, false, 0);
@@ -91,6 +121,9 @@ int main() {
   UNITY_BEGIN();
   RUN_TEST(test_hysteresis_thresholds);
   RUN_TEST(test_boot_counts_min_off_as_satisfied);
+  RUN_TEST(test_boot_lock_holds_the_min_off_after_a_reboot);
+  RUN_TEST(test_boot_lock_never_rearms_after_millis_rollover);
+  RUN_TEST(test_boot_lock_delays_the_sensor_fault_duty_by_60s_only);
   RUN_TEST(test_never_restarts_within_60s_of_off);
   RUN_TEST(test_min_off_survives_millis_rollover);
   RUN_TEST(test_forced_off_starts_min_off_timer);

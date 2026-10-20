@@ -1,6 +1,6 @@
 # Backend
 
-Node 20 + TypeScript (strict) + Express 5 + `better-sqlite3` + `zod` + `pino`. Entry point `src/index.ts`; the app is built by `createApp(config, db)` so tests get a fresh in-memory database.
+Node 22 + TypeScript (strict) + Express 5 + `better-sqlite3` + `zod` + `pino`. Entry point `src/index.ts`; the app is built by `createApp(config, db)` so tests get a fresh in-memory database.
 
 ```
 src/
@@ -45,20 +45,36 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 | `audit:read` (security events, audit log) | ✔ | ✔ | ✔ |
 | `audit:verify` (Verify Integrity) | ✔ | ✔ | ✔ |
 | `metrics:read` (ingestion metrics, P09) | ✔ | ✘ | ✔ |
+| `device:manage` (rotate a device secret, S7) | ✔ | ✘ | ✘ |
 
 `test/rbac.test.ts` takes the routes from the live registry and calls **every route as every role and anonymously**, expecting 2xx / 403 / 401 exactly as the matrix says. A newly registered route without an example request in that test fails the suite.
 
 ## Authentication
 
 - `POST /api/auth/login` `{email, password}`: bcrypt (cost `BCRYPT_COST`, 12) and one generic error, `Invalid email or password`, for every failure. An unknown email is compared against a dummy bcrypt hash, so the timing is the same as a wrong password and accounts cannot be enumerated. Disabled accounts fail the same way.
-- **Throttling:** 10 attempts per minute per IP (`express-rate-limit`). Per account (keyed by the submitted email, whether or not the account exists), after 5 consecutive failures every further attempt is refused with `ACCOUNT_LOCKED` for 1 min, doubling up to 15 min. A successful login clears the counter.
-- **JWT:** HS256 only (algorithm pinned, so `none` and key-confusion tokens fail), `expiresIn` = `JWT_EXPIRES_IN` (`3600`, `15m`, `1h`, `7d`; a bare number means seconds). Claims: `sub`, `role`, `name`, `jti`, `exp`.
-- **Every request** verifies the token, checks `revoked_tokens`, and **re-reads role and active from the database**. Demoting or disabling a user takes effect on their next request, not when the token expires.
-- `GET /api/auth/me` returns the current user. `POST /api/auth/logout` adds the token's `jti` to `revoked_tokens` until its `exp`, and expired revocations are purged every 10 minutes.
+- **Throttling:** `LOGIN_RATE_LIMIT_PER_MIN` (default 10) attempts per minute per IP (`express-rate-limit`) on login and on the TOTP step, and a limiter of the same size on each account route. Per account (keyed by the submitted email, whether or not the account exists), after 5 consecutive failures, wrong TOTP and recovery codes included, every further attempt is refused with `ACCOUNT_LOCKED` for 1 min, doubling up to 15 min. A successful sign-in clears the counter. Behind a reverse proxy, set `TRUST_PROXY` (default `loopback`; a hop count such as `1`, or a list such as `loopback, uniquelocal`) so the limit counts the client, not the proxy.
+- **JWT:** HS256 only (algorithm pinned, so `none` and key-confusion tokens fail), `expiresIn` = `JWT_EXPIRES_IN` (default `1h`; also `3600`, `15m`, `7d`; a bare number means seconds). Claims: `sub`, `role`, `name`, `jti`, `iat`, `exp`.
+- **Browser sessions (S1):** the token is set as the `cc_session` cookie: `HttpOnly`, `SameSite=Strict`, `Secure` in production, `Path=/`, expiring with the token. The login body does not carry it, so no script on the page can read it. Scripts, tools and tests send `X-Auth-Mode: token` on login to get `token` in the body, then use `Authorization: Bearer`. That needs the password, so it gives an XSS nothing.
+- **CSRF:** a write (anything but `GET` / `HEAD` / `OPTIONS`) authenticated by the cookie must carry an `Origin` (or, without one, a `Referer`) equal to `CORS_ORIGIN`, otherwise `403 CSRF_ORIGIN`. Bearer requests are not checked: no browser adds a Bearer header on its own.
+- **Every request** verifies the token, checks `revoked_tokens`, and **re-reads role, active flag, password state and TOTP state from the database**. Demoting or disabling a user takes effect on their next request, not when the token expires. A token issued before the account's last password change (`iat < password_changed_at`) is refused with `TOKEN_REVOKED`, so a password change ends every other session.
+- **Login response:** `{expiresAt, user, mustChangePassword, totpEnabled, mfaSetupRequired, token?}`. `GET /api/auth/me` returns the same flags. `POST /api/auth/logout` adds the token's `jti` to `revoked_tokens` until its `exp` and clears the cookie; expired revocations are purged every 10 minutes.
+
+### Password changes (S2)
+
+- `POST /api/auth/password` `{current, next}`: the new password follows the same policy as an admin-set one and must differ from the current one. A wrong current password is `400 INVALID_CURRENT_PASSWORD`, not 401, which would sign the user out. On success every other session of the account ends and this one gets a fresh session. Audited as `USER_UPDATED` `{fields:['password'], by:'self'}`.
+- **Forced change:** a password generated by the seed or set by an admin (`POST /api/users`, `PATCH /api/users/:id {password}`) sets `must_change_password`. Until it is changed, every route except `me`, `logout`, `password`, `totp/setup` and `totp/confirm` answers `403 PASSWORD_CHANGE_REQUIRED`, and the web app sends the user to `/account/required`. An admin reset also ends the user's sessions.
+
+### Two-factor sign-in (S3)
+
+- **TOTP** (RFC 6238: HMAC-SHA1, 6 digits, 30 s steps, one step either side accepted). The secret is stored encrypted under `APP_SECRET_KEY`, like device secrets. The last used step is stored (`totp_last_step`), so a code cannot be replayed inside its window.
+- **Setup:** `POST /api/auth/totp/setup` returns `{secret, otpauthUri, qrSvg}`. The QR is drawn on the server, so no third party sees the secret. `POST /api/auth/totp/confirm {code}` turns it on and returns **10 recovery codes, once**; only their SHA-256 is stored. `POST /api/auth/totp/disable {code}` turns it off (`409 MFA_REQUIRED` for an Admin while `REQUIRE_ADMIN_MFA` is on).
+- **Login with TOTP:** the password step answers `{mfaRequired:true, mfaToken}`, a 5 min JWT of its own type that is never accepted as a session. `POST /api/auth/totp/verify {mfaToken, code | recoveryCode}` starts the session. The MFA token is revoked on use and a recovery code is spent. Audited as `AUTH_LOGIN` with `mfa: 'totp' | 'recovery_code'`.
+- **`REQUIRE_ADMIN_MFA=true`:** an Admin without TOTP can reach only the account routes (`403 MFA_SETUP_REQUIRED` elsewhere) until it is set up. Other roles are unaffected.
+- **Lost phone:** an Admin clears another user's TOTP with `PATCH /api/users/:id {totp_reset:true}`.
 
 ## Users (Admin)
 
-`GET /api/users`, `POST /api/users` `{email, name, role, password}`, `PATCH /api/users/:id` (any of `name`, `role`, `active`, `password`), `DELETE /api/users/:id` (disables; users are never deleted, so audit and batch history keep valid references). Passwords need at least 10 characters and three of: lowercase, uppercase, digit, symbol. Hashes are never returned. The last active admin cannot be disabled or demoted (`409 LAST_ADMIN`); the check runs again inside the write transaction.
+`GET /api/users`, `POST /api/users` `{email, name, role, password}`, `PATCH /api/users/:id` (any of `name`, `role`, `active`, `password`), `DELETE /api/users/:id` (disables; users are never deleted, so audit and batch history keep valid references). Passwords need at least 10 characters and three of: lowercase, uppercase, digit, symbol. A password an admin sets is temporary: the user must change it at the next sign-in. `totp_reset: true` switches a user's two-factor sign-in off. Hashes and secrets are never returned; the view carries `totp_enabled`. The last active admin cannot be disabled or demoted (`409 LAST_ADMIN`); the check runs again inside the write transaction.
 
 ## Inventory and public QR check (P10)
 
@@ -173,6 +189,29 @@ Routes are declared with `defineRoute({method, path, access, body?, query?, para
 
 **Device secrets** are stored encrypted with AES-256-GCM under `APP_SECRET_KEY` (`v1:<iv>:<tag>:<ciphertext>`). The GCM tag makes a modified value fail to decrypt rather than yield a wrong secret.
 
+### Backups
+
+Every `BACKUP_EVERY_MS` (default 6 h), `backupDb` (`src/db/backup.ts`) writes an online copy with SQLite's backup API to `BACKUP_DIR` (default `./data/backups`, git-ignored). The copy is consistent while the app keeps writing, and queued audit entries are flushed into it first. It then deletes the oldest copies beyond `BACKUP_KEEP` (default 28 = 7 days), and only files it named itself.
+
+**Restore:**
+1. Stop the backend.
+2. Copy `data/backups/coldchain-<time>.db` over `DB_PATH` and delete any `-wal` / `-shm` next to it.
+3. Start the backend.
+4. Run **Verify Integrity**. The chain must be valid, and the restart writes a new audit anchor.
+
+**Off-box copies** (another disk, object storage) are the deployment's job, e.g. a nightly `rclone copy data/backups remote:coldchain`. A backup on the same disk does not survive a disk failure.
+
+### Readings retention (R8)
+
+At 5 s, each fridge writes about 17 280 readings a day. Two jobs keep the database bounded without losing the record:
+
+- **Rollup** (`rollupReadings`, every 10 min): every finished hour goes into `readings_hourly`, with readings count, readings with a temperature, min / max / average, readings above 8 °C, door open, compressor on, on battery, and seeded. The last 48 h are re-aggregated on each run, so readings synced late are folded in.
+- **Retention** (`retireReadings`, hourly): raw readings older than `READINGS_RETENTION_DAYS` (default 90, at least 32) are deleted. A block is deleted only if it is older than the cutoff and every hour it spans is already rolled up.
+  - Deletion goes one **telemetry checkpoint block** (100 readings) at a time, oldest first, each in one transaction with a `READINGS_RETIRED` audit entry. That entry quotes the block's id range and its checkpoint `sha256`.
+  - **Verify Integrity** accepts a block whose readings are all gone only when such an entry is in the chain with the same hash (`retired` in the result). A row in `readings_retired` alone proves nothing, and neither does a partly deleted block: both are still `READINGS_TAMPERED`.
+- **Charts:** for a range that reaches back past the oldest raw reading, `GET /api/fridges/:id/readings` uses the hourly rollups (points with `rollup: 1`) up to the end of the hour that holds the oldest raw reading, and raw readings after it, so no hour is counted twice. Until anything is retired, nothing changes.
+- **Exposure** totals are stored per batch and only ever grow, so deleting old readings never lowers them.
+
 ## Tamper-evident audit log
 
 `src/modules/audit`. Table `audit_log`: `id` (autoincrement), `ts` (unix ms), `actor` (`user:<id>`, `device:<id>` or `system`), `event_type`, `payload` (canonical JSON text), `prev_hash`, `hash`.
@@ -202,7 +241,9 @@ The response is `{valid, checked, headId, headHash, checkpoints, anchors, firstB
 
 ### Anchoring
 
-Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, `count`) in `audit_anchor` and sends it to Telegram (when `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are set) and to the log. A deleted *last* row leaves every remaining link valid; only a head recorded earlier reveals it, and the tests cover exactly this case.
+Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, `count`) in `audit_anchor` and sends it to Telegram (when `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` are set) and to the log.
+
+**RFC 3161 timestamp (S8, optional):** with `ANCHOR_TSA_URL` set (https only, for example `https://freetsa.org/tsr`), each anchor is also sent to that Time-Stamp Authority. Only `SHA-256("coldchain-anchor|<head_id>|<head_hash>|<count>")` leaves the server, never audit content. A granted reply is stored in `audit_anchor.tsa_reply` with `tsa_url` and `tsa_at`. A failure is logged and the next anchor tries again; it never blocks the chain. Verify Integrity reports the newest stamped anchor as `externalAnchor`, and the stored reply can be checked offline with `openssl ts -verify` (docs/SECURITY.md). A deleted *last* row leaves every remaining link valid; only a head recorded earlier reveals it, and the tests cover exactly this case.
 
 **What the chain does and does not prove.** It proves *integrity*: any change to recorded history is detected. It does not prove *who* wrote a row. An attacker with full write access to the database file could delete everything and recompute a consistent chain from scratch. The off-box anchors make that detectable, because the old head no longer matches. Without external anchoring it would not be. A documented extension is an HMAC of each row under a key kept outside the database.
 
@@ -239,7 +280,16 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 - **cmdack:** forwarded to `hooks.onCommandAck` and Socket.IO `device:cmdack`.
 - **status** (LWT `online` / `offline`): unsigned, so it is only a hint (`device:status` with `hint:true`). It is never stored and never decides the online state.
 
-**Gaps and offline:** if a device's seq jumps past `last + 1` and no sync arrives within 30 s, a signed `SYNC_REQUEST` command is sent (once per gap). A device with no accepted message for 20 s is marked `online:false` (`fridge:update`), and after 60 s `hooks.onDeviceOffline` fires once (alert, P12).
+**Gaps and offline:** if a device's seq jumps past `last + 1` and no sync arrives within 30 s, a signed `SYNC_REQUEST {from_seq, to_seq}` naming the gap is sent (once per gap), and the node replays that range from its live-sent window (R1). After a restart, `last` starts from the highest seq already stored for the device, so a hole from while the backend was down is a gap too. A device with no accepted message for 20 s is marked `online:false` (`fridge:update`), and after 60 s `hooks.onDeviceOffline` fires once (alert, P12).
+
+**Secret rotation (S7):** `POST /api/devices/:id/rotate-secret {reason}` (`device:manage`, Admin) generates a new 32-byte secret, stores it encrypted as `pending_secret_enc`, and sends a signed `ROTATE_SECRET` command. Its args carry the new secret sealed under the **old** one: an XOR pad and a tag, both HMAC-SHA256 with their own labels (contract §4). The answer is `202 {device_id, cmd_id, status:'PENDING'}`.
+
+- The node checks the tag, stores the new secret in NVS, switches to it, and signs its `cmdack` with it.
+- The first message that verifies only under the pending secret promotes it in one `UPDATE` (`secret_rotated_at`). From then on the old secret gets `BAD_SIG`.
+- The request and the switch are both audited as `DEVICE_SECRET_ROTATED`.
+- A second request while one is pending is `409 ROTATION_PENDING`: replacing the pending secret could lock out a node that already switched.
+- A node that never got the command keeps working on the old secret. Re-seeding its secret clears the pending one.
+- `GET /api/security/summary` shows `rotation_pending` and `secret_rotated_at` per device.
 
 **Run one ingesting backend per broker prefix.** Two instances on the same database would both process every message, and the second correctly rejects each one as `REPLAY`.
 
@@ -247,7 +297,7 @@ Every hour and at every start, `jobs/` stores the head (`head_id`, `head_hash`, 
 
 ## Realtime
 
-Socket.IO on the same HTTP server. Clients connect with `io(url, {auth: {token: <JWT>}})`; the token is verified, checked against revocations, and the user must be active. Events: `fridge:update` (live state, including `online`), `security:event`, `device:status`, `device:cmdack`; `batch:update`, `alert:new`, `alert:update`, `prediction:update` (each stored prediction) and `relocation:update` (each plan change).
+Socket.IO on the same HTTP server, with the same session as the REST API: the browser's `cc_session` cookie (`withCredentials`), or `io(url, {auth: {token: <JWT>}})` from scripts. The token is verified and checked against revocations and the last password change, and the user must be active. A cookie handshake must come from `CORS_ORIGIN`, the same CSRF rule as REST. Events: `fridge:update` (live state, including `online`), `security:event`, `device:status`, `device:cmdack`; `batch:update`, `alert:new`, `alert:update`, `prediction:update` (each stored prediction) and `relocation:update` (each plan change).
 
 ## Seed
 
@@ -257,9 +307,45 @@ npm run seed        # or: make seed
 
 Creates `admin@`, `pharmacist@` and `inspector@coldchain.local`. Passwords come from `SEED_ADMIN_PASSWORD` / `SEED_PHARMACIST_PASSWORD` / `SEED_INSPECTOR_PASSWORD`, or are random and printed once. It also creates `fridge-01` "Vaccine Fridge A" and `fridge-02` "Vaccine Fridge B" (capacity 20), and devices `fridge-01` / `fridge-02`. Device secrets come from `DEVICE_SECRET_FRIDGE_01/02` in `.env`, so they match the firmware `config.h` from `tools/init_firmware_config.js` and the virtual node; otherwise they are generated and printed once. Re-running never resets passwords or rotates secrets (an `.env` secret that differs from the stored one is applied).
 
+## Metrics (D3)
+
+With `METRICS_PORT` set, a second HTTP server answers `GET /metrics` in the Prometheus text format. It binds to `METRICS_HOST` (default `127.0.0.1`; `0.0.0.0` inside a container, with the port left unpublished). The public API port never serves it (`/metrics` there is 404). It has no login, so keep it off the internet.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `coldchain_readings_total` | counter: readings stored, live and synced | `fridge` |
+| `coldchain_rejects_total` | counter: device messages refused | `reason` |
+| `coldchain_last_reading_age_seconds` | gauge: time since the last accepted message | `fridge` |
+| `coldchain_fridge_temp_c` | gauge: latest temperature | `fridge` |
+| `coldchain_batch_remaining_ratio` | gauge: heat budget left (0..1), batches in stock only | `batch` |
+| `coldchain_ml_tick_seconds` | histogram: one AI scheduler run | |
+| `coldchain_http_request_seconds` | histogram: API latency | `route` (the pattern, never a raw path), `method`, `status` |
+| `coldchain_process_*` | Node defaults: CPU, memory, event-loop lag, GC | |
+
+Example alert rule: `coldchain_last_reading_age_seconds > 300` (no reading from a fridge for 5 minutes).
+
+## Error tracking (D4)
+
+Off unless `ERROR_DSN` is set to a Sentry or self-hosted GlitchTip DSN. `src/shared/errorReport.ts` speaks the Sentry envelope protocol directly (no SDK). It reports unexpected 500s from `errorHandler` (tags: request id, route pattern, method), uncaught exceptions and unhandled rejections; expected 4xx errors are never sent. At most 30 events a minute go out, each a single 5 s POST that never blocks or fails a request. **Scrubbing (beforeSend):** JWTs, `Bearer` values, the `cc_session` cookie, emails and 64-hex secrets are replaced before sending. Request bodies and headers are never attached.
+
 ## Docker
 
-The dev image (Node 20) installs `python3 make g++`, because `better-sqlite3` has no prebuilt Linux binary for Node 20 any more and compiles from source. `make up` passes `--renew-anon-volumes`, so the container's `node_modules` volume picks up new dependencies after a rebuild.
+The dev image (Node 22) installs `python3 make g++`, so the native addons (`better-sqlite3`, `bcrypt`) can compile from source whenever no prebuilt binary matches the Node version. `make up` passes `--renew-anon-volumes`, so the container's `node_modules` volume picks up new dependencies after a rebuild.
+
+### Production with Docker
+
+`infra/docker-compose.prod.yml` runs built images with no source mounts and keeps data on named volumes. The backend and ML images run as unprivileged users, and Mosquitto drops to its own user; Caddy runs as the image's default user to bind 80/443. Every service restarts on its own; broker, backend and ML have healthchecks. It publishes only 80/443 (web app and API through Caddy, HTTPS) and 8883 (devices, MQTT over TLS).
+
+- `backend/Dockerfile.prod`: two stages. The first compiles TypeScript and the native addons; the second copies `dist` and the production `node_modules` into a slim Node 22 image that runs as `node`. Its healthcheck is `GET /api/ready`.
+- `frontend/Dockerfile.prod` builds the app and serves it with Caddy (`frontend/Caddyfile`), which proxies `/api` and `/socket.io` to the backend and gets the certificate for `SITE_ADDRESS`.
+- The backend waits for a healthy broker and ML service. Prometheus can scrape `backend:9464/metrics` on the private network.
+
+**Before the first start:**
+
+1. `.env` at the repo root with real secrets (`npm run env:init`), `NODE_ENV=production`, `PUBLIC_BASE_URL` and `CORS_ORIGIN` = `https://<SITE_ADDRESS>`, `MQTT_USERNAME=backend` and its `MQTT_PASSWORD`, plus `SITE_ADDRESS` and `HEALTHCHECK_PASSWORD` (both are read by Compose itself).
+2. `infra/mosquitto/passwd.prod` with accounts `backend`, `healthcheck` and one per device, for example `mosquitto_passwd -c infra/mosquitto/passwd.prod backend`, then `mosquitto_passwd infra/mosquitto/passwd.prod fridge-01` (no `-c` after the first). It is git-ignored.
+3. `infra/mosquitto/certs/server.crt` and `server.key` for the device listener (git-ignored).
+4. Start: `docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build` from the repo root. `--env-file` matters: without it Compose looks for `infra/.env`.
 
 ## Tests
 
@@ -273,5 +359,13 @@ The dev image (Node 20) installs `python3 make g++`, because `better-sqlite3` ha
 | `rbac.test.ts` | every registered route × Admin / Pharmacist / Inspector / anonymous, plus the matrix itself |
 | `audit.test.ts` | canonical JSON edge cases, genesis and links, clean / empty log, triggers, each tamper case with its reason and record id (edited payload, edited hash, changed ts, deleted row, deleted first row, row inserted in the middle, swapped rows, replaced genesis), deleted tail caught by the anchor, recomputed chain caught by the anchor, partial `?from`, 100 parallel appends and two connections → one valid chain, 100k rows < 3 s without blocking, checkpoints (late rows, edited and deleted readings), reject coalescing, bounded queue, API (logins, failures, user changes, pagination, verify, NDJSON stream) |
 | `ingest.test.ts` | the shared HMAC vectors (and the vector envelope accepted end to end), server `classify()` on the status vectors, accepted telemetry (stored once, live state, server status, push), checkpoint every 100, **each reject reason** (12 cases including topic / device and kind mismatch, oversized, future ts, tampered body, unknown field) logged in `security_events` + audit + realtime, recorded skew, replay of identical bytes, the nonce table cannot be filled by forgers, disabled device, flood (p95 < 20 ms, coalesced to one audit row), events (audit, latch state, alert hook), **sync of 360 readings in 15 chunks with a duplicate and shuffled order → exactly 360 ordered rows, acks signed and monotonic, final ack 360**, lost ack, lost live message / seq jump, ack extension only through stored seqs, old reading ts accepted, oversized / inconsistent chunk, late hook, gap → `SYNC_REQUEST` after 30 s, `WIFI_BACK`, offline watchdog 20 s / 60 s, LWT hint, nonce purge, cmdack, metrics and security-events API |
-| `realtime.test.ts` | Socket.IO pushes to a valid JWT; missing, invalid and revoked tokens refused |
+| `realtime.test.ts` | Socket.IO pushes to a valid JWT; missing, invalid and revoked tokens refused; the session cookie works from the app origin only |
+| `account.test.ts` | S1 cookie sessions (HttpOnly, SameSite, Secure in production, CSRF origin check, logout), S2 password change (current password, policy, older sessions end, forced change, admin reset, seed), S3 TOTP (RFC 6238 vectors, setup, confirm, two-step login, no code reuse, one-time recovery codes, disable, `REQUIRE_ADMIN_MFA`, admin reset) |
+| `config.test.ts` | env validation and defaults, `.env.example` loads on the local broker, placeholders refused, `TRUST_PROXY` forms |
+| `backup.test.ts` | a consistent online copy whose audit chain verifies; only the newest `BACKUP_KEEP` kept |
+| `retention.test.ts` | hourly rollup equals the raw aggregate, only old rolled-up blocks retired and audited, Verify Integrity stays green, unaudited or partial deletes are still tampering, charts use rollups where raw readings are gone |
+| `tsa.test.ts` | RFC 3161 request DER, reply status (long-form lengths too), stamp stored on the anchor, a failing TSA never fails the anchor, nothing sent when unset |
+| `broker-acl.test.ts` | dev broker ACL: devices own topics only, backend, injection account without commands, wildcards and unknown accounts refused |
+| `errorReport.test.ts` | scrubbing, DSN to envelope URL, envelope shape and frames, off without a DSN, 30 a minute cap, a 500 is reported and a 4xx is not |
+| `metrics.test.ts` | counters move with ingest, gauges read at scrape time, route-pattern labels, no `/metrics` on the API port |
 | `users.test.ts` | create (no hash leaked), duplicate email, weak passwords, unknown fields rejected, role change, password reset, disable, last-admin protection, seed (3 users, 2 fridges, 2 devices, encrypted secrets, idempotent) |

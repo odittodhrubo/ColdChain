@@ -46,7 +46,8 @@ def main() -> None:
     db.commit()
     print("backfilled", flush=True)
 
-    nodes = {fid: FridgeNode(fid, seed=9) for fid in WEAK}
+    # carries on from the backfilled history: not a reboot, so no 60 s boot lock
+    nodes = {fid: FridgeNode(fid, seed=9, boot_lock=False) for fid in WEAK}
     for fid, node in nodes.items():
         node.set_efficiency(WEAK[fid])
         node.set_temp(last_temp[fid])  # carry on from the history, no jump

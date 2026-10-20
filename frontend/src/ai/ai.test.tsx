@@ -1,16 +1,18 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Providers } from '../App';
 import type { Role } from '../auth/permissions';
+import { useT } from '../i18n';
 import type { Prediction, RelocationPlan } from '../lib/types';
 import { forecastPoints } from '../pages/FridgeDetailPage';
 import { DEFAULT_ROUTES, FakeSocket, mockApi, signIn } from '../test-utils';
 import { AiPanel } from './AiPanel';
 import { forecastSentence, PredictionMeta, RiskBadge } from './Forecast';
 import { bandOf, healthFactors } from './HealthGauge';
+import { RelocationsPage } from './Relocations';
 import { PlanCard } from './RelocationPanel';
 
 afterEach(() => {
@@ -72,7 +74,8 @@ describe('forecast', () => {
   ] as const)('%s: badge word and the one-line why', (_level, p, badge, sentence) => {
     render(<RiskBadge level={p.breach_level} />);
     expect(screen.getByText(badge)).toBeInTheDocument();
-    expect(forecastSentence(p)).toMatch(sentence);
+    const { t } = renderHook(() => useT()).result.current; // English outside a provider
+    expect(forecastSentence(p, t)).toMatch(sentence);
   });
 
   it('a fallback or old forecast is labelled, never shown as live', () => {
@@ -235,5 +238,29 @@ describe('relocation plan', () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm relocation' })).toBeNull();
     expect(container.querySelector('article')!.textContent).toMatchSnapshot();
+  });
+});
+
+describe('relocation history details', () => {
+  it('a decided plan opens its full details, with the decision note', async () => {
+    const dismissed = plan({
+      status: 'DISMISSED',
+      decided_at: NOW - 30_000,
+      decision_note: 'Second cooler on site; not needed',
+    });
+    mockApi({
+      ...DEFAULT_ROUTES,
+      ...me('PHARMACIST'),
+      'GET /api/fridges': { status: 200, body: { fridges: [], server_time: NOW, demoScale: 1 } },
+      'GET /api/relocations?status=active': { status: 200, body: { plans: [], server_time: NOW } },
+      'GET /api/relocations?status=all': { status: 200, body: { plans: [dismissed], server_time: NOW } },
+    });
+    wrap(<RelocationsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = screen.getByRole('dialog', { name: 'Relocation plan · Vaccine Fridge A' });
+    expect(within(dialog).getByText('Measles-Rubella')).toBeInTheDocument();
+    expect(within(dialog).getByText('This plan is dismissed.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Note: Second cooler on site; not needed')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Confirm relocation' })).toBeNull();
   });
 });

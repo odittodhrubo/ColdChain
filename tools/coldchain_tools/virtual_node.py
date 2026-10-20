@@ -19,6 +19,7 @@ import queue
 import sys
 import threading
 import time
+import zlib
 from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
@@ -75,6 +76,8 @@ class Uplink:
         self.outage = False
         self.buffer = RingBuffer()
         self.syncer = Syncer(self.buffer)
+        # R1, as the firmware: live-sent messages stay replayable (the last 720) for SYNC_REQUEST
+        self.recent = RingBuffer()
         self.nonces: deque[str] = deque(maxlen=32)
         self.rejected: dict[str, int] = {}
         self.sent = 0
@@ -100,9 +103,13 @@ class Uplink:
         for m in messages:
             if m.kind == "telemetry":
                 live = {"buf": len(self.buffer), "rssi": -55, "dropped": self.buffer.dropped}
-                if not self._publish("telemetry", reading_json(m.reading, live)):
+                if self._publish("telemetry", reading_json(m.reading, live)):
+                    self.recent.push(dict(m.reading))
+                else:
                     self.buffer.push(dict(m.reading))
-            elif not self._publish("event", event_json(m.seq, m.ts, m.type, m.data)):
+            elif self._publish("event", event_json(m.seq, m.ts, m.type, m.data)):
+                self.recent.push({"seq": m.seq, "ts": m.ts, "type": m.type})
+            else:
                 self.buffer.push({"seq": m.seq, "ts": m.ts, "type": m.type})  # data is not buffered
         if self.seq_file and self.node.seq - self._saved_seq >= SEQ_SAVE_EVERY:
             self._saved_seq = self.node.seq
@@ -150,8 +157,22 @@ class Uplink:
                 return
             type_ = body.get("type")
             if type_ == "SYNC_REQUEST":
+                args = body.get("args") or {}
+                lo, hi = args.get("from_seq"), args.get("to_seq")
+                if not (isinstance(lo, int) and isinstance(hi, int)):
+                    lo, hi = 0, 2**32 - 1  # no range named: replay everything kept
+                replayed = self.recent.move_range_to(self.buffer, lo, hi)
                 self.syncer.restart()
-                ok, detail = True, f"resync, {len(self.buffer)} buffered"
+                ok, detail = True, f"resync, {len(self.buffer)} buffered, {replayed} replayed"
+            elif type_ == "ROTATE_SECRET":  # S7, as the firmware: open the sealed secret, then switch to it
+                args = body.get("args") or {}
+                new = envelope.rotate_open(self.secret, args.get("nonce"), args.get("ct"), args.get("tag"))
+                if new:
+                    self.secret = new  # the cmdack below is signed with it: the server's proof of the switch
+                    ok, detail = True, "secret rotated"
+                else:
+                    self._reject("BAD_ROTATION")
+                    ok, detail = False, "sealed secret did not verify"
             elif type_ in ("RESET_LATCH", "SET_LATCH", "BUZZER_TEST"):
                 ok, detail = self.node.command(type_)
             else:
@@ -244,15 +265,21 @@ class NodeRunner:
     a background thread (start(): scenario tests, the demo). Actions are safe to call from another thread."""
 
     def __init__(self, device_id: str, secret: str, url: str, username: str, password: str, prefix: str,
-                 thermal_speed: float = 1.0, seq_file: SeqFile | None = None):  # fmt: skip
+                 thermal_speed: float = 1.0, seq_file: SeqFile | None = None,
+                 boot_lock: bool = True):  # fmt: skip
+        # Mix the device id into the seed so two nodes started in the same second get different thermal noise
+        # and compressor phase: the fridges then read differently at any instant, not in lockstep.
+        seed = int(time.time()) ^ zlib.crc32(device_id.encode())
         self.node = FridgeNode(
-            device_id, seed=int(time.time()), start_seq=seq_file.start() if seq_file else 0,
-            thermal_speed=thermal_speed,
+            device_id, seed=seed, start_seq=seq_file.start() if seq_file else 0,
+            thermal_speed=thermal_speed, boot_lock=boot_lock,
         )  # fmt: skip
+        # demo controls from the web app (SIM_CONTROLS): unsigned, demo-only, not one of the contract TOPICS
+        self.sim_topic = f"{prefix}/{device_id}/sim"
         self.transport = MqttTransport(
             url, username, password, f"{device_id}-virtual-{int(time.time() * 1000) % 1_000_000}",
             topic(prefix, device_id, "status"),
-            [topic(prefix, device_id, "ack"), topic(prefix, device_id, "cmd")],
+            [topic(prefix, device_id, "ack"), topic(prefix, device_id, "cmd"), self.sim_topic],
         )  # fmt: skip
         self.uplink = Uplink(self.node, secret, prefix, self.transport, seq_file)
         self.seq_file = seq_file
@@ -269,8 +296,25 @@ class NodeRunner:
             self.uplink.deliver(self.node.tick(now_ms, now - self._last, lambda: int(time.time())))
             self._last = now
             while not self.transport.inbox.empty():
-                self.uplink.handle(*self.transport.inbox.get())
+                t, payload = self.transport.inbox.get()
+                if t == self.sim_topic:
+                    self._apply_sim(payload)  # under self.lock already; call the node directly, not act()
+                else:
+                    self.uplink.handle(t, payload)
             self.uplink.pump(now_ms)
+
+    def _apply_sim(self, payload: str) -> None:
+        """A demo control from the web app: {"action": door|temp|power|wifi|eff|ajar, "arg": ...}."""
+        try:
+            msg = json.loads(payload)
+            action, arg = msg["action"], msg.get("arg")
+        except (ValueError, KeyError, TypeError):
+            return
+        if action == "wifi":
+            self.uplink.outage = bool(arg)
+            self.transport.set_outage(bool(arg))
+        else:
+            apply_action(self.node, action, arg)
 
     def act(self, action: str, arg=None) -> None:
         """A scenario action: door, power (toggle), wifi (outage on/off), eff, temp, ajar."""

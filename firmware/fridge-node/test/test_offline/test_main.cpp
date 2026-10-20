@@ -27,7 +27,7 @@ Reading sample(uint32_t seq) {
 
 void test_entry_is_16_bytes_and_round_trips() {
   TEST_ASSERT_EQUAL(16, sizeof(BufEntry));
-  Reading r{42, 1767225600, -3.25f, true, false, true, 37, FridgeState::BREACH, 70000, true, true, true};
+  Reading r{42, 1767225600, -3.25f, true, false, true, 37, FridgeState::BREACH, 70000, true, true, true, NAN};
   const Reading back = unpackReading(packReading(r));
   TEST_ASSERT_EQUAL_UINT32(42, back.seq);
   TEST_ASSERT_EQUAL_FLOAT(-3.25f, back.temp);
@@ -99,7 +99,7 @@ void test_full_chunk_fits_the_buffers() {
   buf = RingBuffer();
   for (uint32_t s = 0; s < cc::SYNC_CHUNK; s++) {  // worst case: every field at its longest
     Reading r{4000000000u + s, 4000000000u, -12.34f, true, true, true, 100, FridgeState::WARNING, 70000, true,
-              true, false};
+              true, false, NAN};
     buf.push(packReading(r));
   }
   static char body[6144];
@@ -178,6 +178,93 @@ void test_sync_survives_30pct_loss_of_data_and_acks() {
 }
 
 void test_sync_full_30_minute_outage() { runLossy(7, 30, 30 * 60 * 1000); }  // 360 readings
+
+// ---------------------------------------------------------------- R1: retain until acknowledged
+
+void test_replay_moves_only_the_gap_in_seq_order() {
+  static RingBuffer recent, buf;
+  recent = RingBuffer();
+  buf = RingBuffer();
+  for (uint32_t s = 1; s <= 50; s++) recent.push(packReading(sample(s)));  // sent live
+  for (uint32_t s = 60; s <= 70; s++) buf.push(packReading(sample(s)));    // a later Wi-Fi outage
+  TEST_ASSERT_EQUAL(11, recent.moveRangeTo(buf, 20, 30));
+  TEST_ASSERT_EQUAL(22, buf.size());
+  for (size_t i = 1; i < buf.size(); i++) TEST_ASSERT_TRUE(buf.at(i - 1).seq < buf.at(i).seq);  // ordered
+  TEST_ASSERT_EQUAL_UINT32(20, buf.at(0).seq);
+  TEST_ASSERT_EQUAL_UINT32(60, buf.at(11).seq);
+  TEST_ASSERT_EQUAL(39, recent.size());  // 1..19 and 31..50 stay replayable
+  TEST_ASSERT_EQUAL_UINT32(19, recent.at(18).seq);
+  TEST_ASSERT_EQUAL_UINT32(31, recent.at(19).seq);
+  TEST_ASSERT_EQUAL_UINT32(0, buf.dropped());
+}
+
+void test_insert_sorted_ignores_duplicates_and_never_overwrites() {
+  static RingBuffer buf;
+  buf = RingBuffer();
+  for (uint32_t s = 1; s <= RingBuffer::CAPACITY; s += 1) buf.push(packReading(sample(s * 2)));  // full, even seqs
+  TEST_ASSERT_TRUE(buf.insertSorted(packReading(sample(10))));  // already there: no-op
+  TEST_ASSERT_FALSE(buf.insertSorted(packReading(sample(11))));  // full: refused, nothing lost
+  TEST_ASSERT_EQUAL(RingBuffer::CAPACITY, buf.size());
+  TEST_ASSERT_EQUAL_UINT32(0, buf.dropped());
+  buf.freeUpTo(100);
+  TEST_ASSERT_TRUE(buf.insertSorted(packReading(sample(101))));
+  TEST_ASSERT_EQUAL_UINT32(101, buf.at(0).seq);
+  TEST_ASSERT_EQUAL_UINT32(102, buf.at(1).seq);
+}
+
+void test_ack_never_frees_an_entry_replayed_after_its_chunk_went_out() {
+  static RingBuffer recent, buf;
+  recent = RingBuffer();
+  buf = RingBuffer();
+  Syncer sync(buf);
+  for (uint32_t s = 150; s <= 160; s++) recent.push(packReading(sample(s)));
+  for (uint32_t s = 200; s <= 219; s++) buf.push(packReading(sample(s)));
+  TEST_ASSERT_TRUE(sync.due(0, true));
+  sync.sent(0);                                      // chunk 200..219 in flight
+  TEST_ASSERT_EQUAL(11, recent.moveRangeTo(buf, 150, 160));  // SYNC_REQUEST for the gap meanwhile
+  TEST_ASSERT_TRUE(sync.onAck(219));                 // the server acks the chunk it got
+  TEST_ASSERT_EQUAL(11, buf.size());                 // 150..160 were never sent: still here
+  TEST_ASSERT_EQUAL_UINT32(150, buf.at(0).seq);
+  TEST_ASSERT_TRUE(sync.due(1, true));
+  TEST_ASSERT_EQUAL(11, sync.chunkSize());
+}
+
+// The backend is down for a while: live messages reach the socket but the broker drops them (QoS 0). When it
+// is back it sees the seq gap and asks for that range; the replay window has it. Nothing is lost.
+void test_backend_outage_recovered_from_the_replay_window() {
+  static RingBuffer recent, buf;
+  recent = RingBuffer();
+  buf = RingBuffer();
+  Syncer sync(buf);
+  std::set<uint32_t> stored;
+  uint32_t seq = 0, maxSeen = 0;
+  bool gapRequested = false;
+  for (uint32_t t = 0; t < 30 * 60 * 1000; t += 100) {
+    const bool backendUp = t < 5 * 60 * 1000 || t >= 15 * 60 * 1000;  // 10 min outage
+    if (t < 20 * 60 * 1000 && t % 5000 == 0) {
+      seq++;
+      recent.push(packReading(sample(seq)));  // published live (the uplink to the broker is fine)
+      if (backendUp) {
+        if (maxSeen && seq > maxSeen + 1 && !gapRequested) {  // server: gap -> SYNC_REQUEST {from, to}
+          recent.moveRangeTo(buf, maxSeen + 1, seq - 1);
+          sync.restart();
+          gapRequested = true;
+        }
+        stored.insert(seq);
+        maxSeen = seq > maxSeen ? seq : maxSeen;
+      }
+    }
+    if (sync.due(t, true)) {
+      const size_t n = sync.chunkSize();
+      for (size_t i = 0; i < n; i++) stored.insert(buf.at(i).seq);
+      sync.sent(t);
+      sync.onAck(buf.at(n - 1).seq);
+    }
+  }
+  TEST_ASSERT_TRUE(gapRequested);
+  TEST_ASSERT_TRUE(buf.empty());
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(seq, stored.size(), "a reading sent during the backend outage was lost");
+}
 
 void test_no_free_before_ack_and_retry_cadence() {
   static RingBuffer buf;
@@ -277,6 +364,10 @@ int main() {
   RUN_TEST(test_full_chunk_fits_the_buffers);
   RUN_TEST(test_sync_survives_30pct_loss_of_data_and_acks);
   RUN_TEST(test_sync_full_30_minute_outage);
+  RUN_TEST(test_replay_moves_only_the_gap_in_seq_order);
+  RUN_TEST(test_insert_sorted_ignores_duplicates_and_never_overwrites);
+  RUN_TEST(test_ack_never_frees_an_entry_replayed_after_its_chunk_went_out);
+  RUN_TEST(test_backend_outage_recovered_from_the_replay_window);
   RUN_TEST(test_no_free_before_ack_and_retry_cadence);
   RUN_TEST(test_ack_advances_stale_ack_ignored_restart_resends);
   RUN_TEST(test_battery_drains_warns_once_dies_and_recharges);

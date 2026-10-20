@@ -11,9 +11,10 @@ import {
   WifiOff,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
 import { can } from '../auth/permissions';
+import { useT } from '../i18n';
 import { ago, clock, mmss } from '../lib/time';
 import type { Fridge } from '../lib/types';
 import { STATUS } from '../ui/status';
@@ -54,6 +55,7 @@ function Row({
 
 /** One fridge, everything about it readable in a second: status, temperature, door, power, compressor, link. */
 export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
+  const { t } = useT();
   const { user } = useAuth();
   const live = fridge.live;
   const status = fridgeStatus(fridge, now);
@@ -79,7 +81,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
         >
           <span className="flex items-center gap-2 text-sm font-bold">
             <Siren aria-hidden className="size-4" />
-            DISCARD LATCH – admin reset required
+            {t('latch.banner')}
           </span>
           {can(user?.role, 'latch:reset') && (
             <ResetLatchButton fridgeId={fridge.id} fridgeName={fridge.name} />
@@ -95,7 +97,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
             </Link>
           </h2>
           <p className="text-xs text-ink-3">
-            {fridge.id} · {fridge.load}/{fridge.capacity} batches
+            {fridge.id} · {fridge.load}/{fridge.capacity} {t('fridge.batches')}
           </p>
         </div>
         <StatusChip status={status} />
@@ -111,11 +113,11 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
             {live?.temp === null || live === null ? '––' : live.temp.toFixed(1)}
           </span>
           <span className="text-lg font-semibold text-ink-2">°C</span>
-          {live?.mode === 'manual' && <span className="ml-2 text-xs text-ink-3">probe</span>}
+          {live?.mode === 'manual' && <span className="ml-2 text-xs text-ink-3">{t('fridge.probe')}</span>}
         </p>
         {stale !== null && (
           <p role="status" className="mt-1 text-sm font-semibold text-offline">
-            No data for {stale} s
+            {t('fridge.noDataFor').replace('{n}', String(stale))}
           </p>
         )}
         <TempGauge temp={live?.temp ?? null} ink={meta.ink} />
@@ -132,25 +134,25 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
               <DoorClosed className={icon} />
             )
           }
-          label="Door"
+          label={t('fridge.door')}
           tone={door.alarm ? 'var(--breach)' : door.open ? 'var(--warning)' : undefined}
         >
           {!live
             ? '–'
             : door.open
-              ? `Open for ${mmss(door.seconds)}${door.alarm ? ' · alarm' : ''}`
-              : 'Closed'}
+              ? `${t('fridge.openFor').replace('{t}', mmss(door.seconds))}${door.alarm ? ` · ${t('fridge.alarm')}` : ''}`
+              : t('fridge.closed')}
         </Row>
         <Row
           icon={live?.power === 'BATTERY' ? <BatteryWarning className={icon} /> : <Plug className={icon} />}
-          label="Power"
+          label={t('fridge.power')}
           tone={live?.power === 'BATTERY' ? 'var(--warning)' : undefined}
         >
           {!live ? (
             '–'
           ) : live.power === 'BATTERY' ? (
             <span className="flex items-center gap-2">
-              Battery
+              {t('fridge.battery')}
               <span
                 aria-label={`battery ${live.batt} %`}
                 className="relative h-2 w-16 overflow-hidden rounded-full bg-panel-2 ring-1 ring-rule ring-inset"
@@ -163,11 +165,12 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
                   }}
                 />
               </span>
-              {live.batt} %{live.battery_since ? ` · since ${clock(live.battery_since)}` : ''}
+              {live.batt} %
+              {live.battery_since ? ` · ${t('fridge.since').replace('{t}', clock(live.battery_since))}` : ''}
             </span>
           ) : (
             <span className="flex items-center gap-1.5">
-              Mains <BatteryCharging aria-hidden className="size-3.5 text-ink-3" /> {live.batt} %
+              {t('fridge.mains')} <BatteryCharging aria-hidden className="size-3.5 text-ink-3" /> {live.batt} %
             </span>
           )}
         </Row>
@@ -175,30 +178,30 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
           icon={
             <Fan className={`${icon} ${comp.on ? 'motion-safe:animate-[spin_2.4s_linear_infinite]' : ''}`} />
           }
-          label="Compressor"
+          label={t('fridge.compressor')}
           tone={comp.on ? 'var(--teal)' : undefined}
         >
           {!live
             ? '–'
             : comp.on
-              ? 'On · cooling'
+              ? t('fridge.onCooling')
               : comp.restartInS > 0
-                ? `Off · off-timer ${comp.restartInS} s until restart allowed`
-                : 'Off'}
+                ? t('fridge.offTimer').replace('{n}', String(comp.restartInS))
+                : t('fridge.off')}
         </Row>
         <Row
           icon={status === 'OFFLINE' ? <WifiOff className={icon} /> : <Wifi className={icon} />}
-          label="Link"
+          label={t('fridge.link')}
           tone={status === 'OFFLINE' ? 'var(--offline)' : undefined}
         >
           {!live
-            ? 'Never seen'
+            ? t('fridge.neverSeen')
             : status === 'OFFLINE'
-              ? `Offline · last seen ${ago((now - live.last_seen) / 1000)}`
-              : `Online · ${ago((now - live.last_seen) / 1000)}`}
+              ? t('fridge.offlineLastSeen').replace('{t}', ago((now - live.last_seen) / 1000, t))
+              : t('fridge.onlineAgo').replace('{t}', ago((now - live.last_seen) / 1000, t))}
           {live && live.buf > 0 && (
             <span className="block text-xs font-medium text-warning">
-              buffered {live.buf} readings, syncing…
+              {t('fridge.buffered').replace('{n}', String(live.buf))}
             </span>
           )}
         </Row>

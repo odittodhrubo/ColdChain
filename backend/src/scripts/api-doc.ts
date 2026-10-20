@@ -86,7 +86,7 @@ Generated from the backend's route registry by \`npm --prefix backend run docs:a
 test suite fails when this file is stale.
 
 - Base URL: the backend (\`http://localhost:4000\`). Requests and responses are JSON unless noted.
-- Authentication: \`Authorization: Bearer <JWT>\` from \`POST /api/auth/login\` (8 h). Who may call a route is
+- Authentication: \`Authorization: Bearer <JWT>\` from \`POST /api/auth/login\` (lifetime \`JWT_EXPIRES_IN\`, default 1 h). Who may call a route is
   enforced on the server; the UI only mirrors it.
 - Errors: \`{ "error": { "code", "message", "details"? } }\` with 400 (validation, unknown fields refused),
   401, 403, 404, 409 (state conflicts, e.g. \`FRIDGE_FULL\`, \`PLAN_CHANGED\`), 429 (rate limited), 503.

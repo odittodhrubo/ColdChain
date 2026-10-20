@@ -83,9 +83,12 @@ function row(db: Db, id: number): BatchRow {
 
 export const getBatch = (db: Db, id: number, nowMs = Date.now()) => view(row(db, id), nowMs);
 
+/** Public QR lookup. A discarded batch answers even after it was removed from the inventory: a vial that
+ * escaped disposal must still read "Discard – do not use", never "Batch not found". */
 export function getBatchByToken(db: Db, token: string): BatchView | null {
-  const r = db.prepare(`${SELECT} WHERE b.public_token = ? AND b.deleted_at IS NULL`).get(token) as
-    BatchRow | undefined;
+  const r = db
+    .prepare(`${SELECT} WHERE b.public_token = ? AND (b.deleted_at IS NULL OR b.status = 'DISCARD')`)
+    .get(token) as BatchRow | undefined;
   return r ? view(r) : null;
 }
 
@@ -265,15 +268,25 @@ export function moveInTransaction(
   return b.fridge_id;
 }
 
-/** Soft delete, Admin only, once the batch is used up (quantity 0). It leaves its fridge; history stays. */
-export function deleteBatch(ctx: AppContext, id: number, userId?: number, nowMs = Date.now()) {
+/**
+ * Soft delete, Admin only, with a reason recorded in the audit log. The batch leaves the inventory and frees
+ * its fridge slot; its history and hash-chained record stay. A discarded batch still reads DISCARD on its QR
+ * after deletion (getBatchByToken), so a vial that escaped disposal never scans as "not found".
+ */
+export function deleteBatch(ctx: AppContext, id: number, userId?: number, reason?: string, nowMs = Date.now()) {
   const { db } = ctx;
   const b = row(db, id);
-  if (b.quantity !== 0) throw conflict('QUANTITY_NOT_ZERO', 'Only a batch with quantity 0 can be deleted');
+  const disposed = b.status === 'DISCARD' && b.acknowledged_at !== null;
   db.transaction(() => {
     db.prepare('UPDATE batch_assignments SET to_ts = ? WHERE batch_id = ? AND to_ts IS NULL').run(nowMs, id);
     db.prepare('UPDATE batches SET deleted_at = ?, updated_at = ? WHERE id = ?').run(nowMs, nowMs, id);
-    ctx.audit.append(actorOf(userId), 'BATCH_UPDATED', { batch_id: id, deleted: true });
+    ctx.audit.append(actorOf(userId), 'BATCH_UPDATED', {
+      batch_id: id,
+      deleted: true,
+      disposed,
+      status: b.status,
+      reason: reason ?? null,
+    });
   })();
   ctx.realtime.emit('batch:update', { id, deleted: true });
   return { id, deleted: true };

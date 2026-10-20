@@ -215,18 +215,45 @@ describe('batches API', () => {
     expect(rt.of('batch:update').at(-1)).toMatchObject({ id: batch.id, status: 'AT_RISK' });
   });
 
-  it('soft delete: Admin only, quantity 0 only, frees the fridge slot', async () => {
+  it('soft delete: Admin only, needs a reason, frees the fridge slot, records the reason', async () => {
     const t = makeApp();
     const f = addFridge(t, 1);
     const batch = mk(t, f);
     const admin = await asRole(t, 'ADMIN');
-    const del = () => t.http().delete(`/api/batches/${batch.id}`);
-    expect((await del().set(admin)).body.error.code).toBe('QUANTITY_NOT_ZERO');
-    expect((await del().set(await asRole(t, 'PHARMACIST'))).status).toBe(403);
-    await t.http().patch(`/api/batches/${batch.id}`).set(admin).send({ quantity: 0 });
-    expect((await del().set(admin)).status).toBe(200);
+    const del = (reason?: string) => {
+      const r = t.http().delete(`/api/batches/${batch.id}`).set(admin);
+      return reason === undefined ? r.send() : r.send({ reason });
+    };
+    expect((await del()).status).toBe(400); // a reason is required
+    expect((await del('x')).status).toBe(400); // too short
+    expect(
+      (await t.http().delete(`/api/batches/${batch.id}`).set(await asRole(t, 'PHARMACIST')).send({ reason: 'no' }))
+        .status,
+    ).toBe(403);
+    expect((await del('wrong fridge, moved by hand')).status).toBe(200); // a live batch can be deleted now
     expect((await t.http().get(`/api/batches/${batch.id}`).set(admin)).status).toBe(404);
     expect(mk(t, f).fridge_id).toBe(f); // the slot is free again
+    const last = t.db
+      .prepare("SELECT payload FROM audit_log WHERE event_type = 'BATCH_UPDATED' ORDER BY id DESC LIMIT 1")
+      .pluck()
+      .get() as string;
+    expect(JSON.parse(last)).toMatchObject({ deleted: true, reason: 'wrong fridge, moved by hand' });
+  });
+
+  it('a deleted discarded batch still reads DISCARD on its QR', async () => {
+    const t = makeApp();
+    const f = addFridge(t, 1);
+    const batch = mk(t, f);
+    setExposure(t, batch.id, 3600); // budget spent
+    refreshStatus(ctxOf(t), batch.id); // -> DISCARD
+    const admin = await asRole(t, 'ADMIN');
+    const del = () => t.http().delete(`/api/batches/${batch.id}`).set(admin).send({ reason: 'disposed per SOP' });
+    expect((await del()).status).toBe(200);
+    expect((await t.http().get('/api/batches').set(admin)).body.batches).toEqual([]);
+    expect(mk(t, f).fridge_id).toBe(f); // the slot is free again
+    const pub = await t.http().get(`/api/public/batch/${batch.public_token}`);
+    expect(pub.status).toBe(200);
+    expect(pub.body.status).toBe('DISCARD'); // never "not found" for a vial that escaped disposal
   });
 
   it('Inspector is read-only', async () => {

@@ -94,10 +94,17 @@ class CompressorControl:
 
     def __init__(self):
         self.on = False
-        self._has_switched_off = False  # boot: min-off counts as satisfied
+        self._has_switched_off = False  # boot: min-off counts as satisfied (unless boot_lock())
         self._changed_at_ms = 0
+        self._boot_at_ms: int | None = None
+
+    def boot_lock(self, now_ms: int) -> None:
+        """As the firmware's bootLock(): a reboot is an unseen OFF, so no start for 60 s after it."""
+        self._boot_at_ms = now_ms
 
     def _min_off_elapsed(self, now_ms: int) -> bool:
+        if self._boot_at_ms is not None and now_ms - self._boot_at_ms < C["COMP_MIN_OFF_S"] * 1000:
+            return False
         return not self._has_switched_off or now_ms - self._changed_at_ms >= C["COMP_MIN_OFF_S"] * 1000
 
     def waiting_min_off(self, now_ms: int) -> bool:
@@ -303,22 +310,60 @@ class RingBuffer:
         self.capacity = capacity
         self.items: deque[dict] = deque()
         self.dropped = 0
+        self._sent: set[int] = set()  # seqs that went out in a sync chunk (the firmware's bufflag::SENT)
 
     def __len__(self) -> int:
         return len(self.items)
 
     def push(self, entry: dict) -> None:
         if len(self.items) == self.capacity:
-            self.items.popleft()
+            self._sent.discard(self.items.popleft()["seq"])
             self.dropped += 1
         self.items.append(entry)
 
     def free_up_to(self, seq: int) -> int:
         n = 0
         while self.items and self.items[0]["seq"] <= seq:
-            self.items.popleft()
+            self._sent.discard(self.items.popleft()["seq"])
             n += 1
         return n
+
+    # ---- R1, as the firmware (ringbuf.cpp): replay window, sorted insert, ack frees only what was sent
+
+    def mark_sent(self, n: int) -> None:
+        self._sent.update(e["seq"] for e in list(self.items)[:n])
+
+    def free_sent_up_to(self, seq: int) -> int:
+        keep = deque(e for e in self.items if not (e["seq"] in self._sent and e["seq"] <= seq))
+        freed = len(self.items) - len(keep)
+        self._sent = {s for s in self._sent if s > seq}
+        self.items = keep
+        return freed
+
+    def insert_sorted(self, entry: dict) -> bool:
+        """Keeps seq order; False (nothing stored) when full; a seq already here is a no-op."""
+        seqs = [e["seq"] for e in self.items]
+        if entry["seq"] in seqs:
+            return True
+        if len(self.items) == self.capacity:
+            return False
+        pos = len(seqs)
+        while pos > 0 and seqs[pos - 1] > entry["seq"]:
+            pos -= 1
+        self.items.insert(pos, entry)
+        return True
+
+    def move_range_to(self, dst: RingBuffer, from_seq: int, to_seq: int) -> int:
+        """Entries with from_seq <= seq <= to_seq go to dst (sorted); those dst has no room for stay here."""
+        keep: deque[dict] = deque()
+        moved = 0
+        for e in self.items:
+            if from_seq <= e["seq"] <= to_seq and dst.insert_sorted(e):
+                moved += 1
+            else:
+                keep.append(e)
+        self.items = keep
+        return moved
 
 
 class Syncer:
@@ -355,13 +400,14 @@ class Syncer:
         return list(self.buf.items)[: C["SYNC_CHUNK"]]
 
     def sent(self, now_ms: int) -> None:
+        self.buf.mark_sent(C["SYNC_CHUNK"])
         self.waiting = True
         self._sent_at = now_ms
 
     def on_ack(self, seq_upto: int) -> bool:
         if not self.buf.items or seq_upto < self.buf.items[0]["seq"]:
             return False  # late duplicate
-        self.buf.free_up_to(seq_upto)
+        self.buf.free_sent_up_to(seq_upto)  # an entry replayed in after its chunk went out stays
         self.acked_up_to = seq_upto
         self.waiting, self.retries, self._backoff = False, 0, False
         return True
@@ -391,7 +437,16 @@ class FridgeNode:
 
     SAMPLE_MS = 1000
 
-    def __init__(self, device_id: str, seed: int = 1, start_seq: int = 0, thermal_speed: float | None = None):
+    def __init__(
+        self,
+        device_id: str,
+        seed: int = 1,
+        start_seq: int = 0,
+        thermal_speed: float | None = None,
+        boot_lock: bool = True,
+    ):
+        """boot_lock=False: this node continues a fridge's seeded history (demo, scenarios, e2e), it is not a
+        reboot, so the firmware's 60 s boot lock (a reset is an unseen OFF) does not apply."""
         self.device_id = device_id
         self.model = ThermalModel(seed, thermal_speed)
         self.comp = CompressorControl()
@@ -401,10 +456,12 @@ class FridgeNode:
         self.seq = start_seq
         self.door_open = False
         self.battery_requested = False
+        self.hold: float | None = None  # manual mode: the reading is pinned here, like the Wokwi slider
         self.temp: float = self.model.read()
         self.sensor_fault = False  # no DS18B20 in the simulator; kept so the logic matches the firmware
         self.state = "SAFE"
         self._last_sample_ms: int | None = None
+        self._booted = not boot_lock
         self._last_telemetry_ms: int | None = None
         self._last_door = False
         self._out: list[Message] = []
@@ -423,6 +480,13 @@ class FridgeNode:
 
     def set_temp(self, temp: float) -> None:
         self.model.temp = temp
+        self.hold = None  # a one-off jump releases manual mode: the model carries on from here
+
+    def set_hold(self, temp: float | None) -> None:
+        """Pin the reading at temp (manual mode); None releases it, the model carrying on from there."""
+        if temp is None and self.hold is not None:
+            self.model.temp = self.hold
+        self.hold = temp
 
     # ---- outputs
 
@@ -448,7 +512,7 @@ class FridgeNode:
             "state": self.state,
             "exp_s": self.heat.exp_s,
             "latch": int(self.heat.latched),
-            "mode": "model",
+            "mode": "model" if self.hold is None else "manual",
             "reason": "door" if door_reason else "periodic",
         }
 
@@ -484,6 +548,9 @@ class FridgeNode:
 
         Returns every message queued since the last drain, including ones from commands between ticks."""
         self._ts_fn = ts_fn
+        if not self._booted:  # the first tick is the boot, as the firmware's setup(): comp.bootLock(millis())
+            self._booted = True
+            self.comp.boot_lock(now_ms)
         ev = self.power.update(self.battery_requested, dt_s)
         if ev.power_fail:
             self.event("POWER_FAIL")
@@ -524,7 +591,7 @@ class FridgeNode:
         return self.drain()
 
     def _sample(self, now_ms: int, dt_heat: float) -> None:
-        self.temp = self.model.read()
+        self.temp = self.model.read() if self.hold is None else self.hold
         if self.heat.update(self.temp, self.sensor_fault, dt_heat):
             self._latch_set("budget")
         self.state = classify(self.temp, self.door_open, self.power.on_battery, self.sensor_fault)
@@ -534,8 +601,8 @@ class FridgeNode:
 
 # ---------------------------------------------------------- scenarios (timed scripts, seconds from start)
 
-# Actions: ("door", bool), ("power", None) toggles, ("wifi", bool), ("eff", float), ("temp", float),
-# ("ajar", k_door or None)
+# Actions: ("door", bool), ("power", None) toggles or ("power", bool) sets battery, ("wifi", bool),
+# ("eff", float), ("temp", float), ("hold", float or None), ("ajar", k_door, True for AJAR_K, None/False)
 # Door left ajar on the nominal fridge: the heat gain at 7 °C is 5 % above the compressor's cooling, so the
 # temperature creeps past 8 °C over roughly a quarter of an hour (the forecaster's 10-minute warning case).
 AJAR_K = F["COOL_RATE_C_PER_S"] * 1.05 / (F["T_AMBIENT_C"] - 7.0) - F["K_LEAK_PER_S"]
@@ -568,18 +635,25 @@ SCENARIOS: dict[str, list[tuple[float, str, object]]] = {
 def apply_action(node: FridgeNode, action: str, arg) -> None:
     """Apply a scenario action that the node itself handles (wifi is the uplink's job)."""
     if action == "door":
+        node.model.params["K_DOOR_PER_S"] = F["K_DOOR_PER_S"]  # a real open/close ends any "ajar" episode
         node.set_door(bool(arg))
-    elif action == "power":
-        node.toggle_power()
+    elif action == "power":  # None toggles (scenarios, CLI); a bool sets it: True = mains cut, on battery
+        if arg is None:
+            node.toggle_power()
+        else:
+            node.battery_requested = bool(arg)
     elif action == "eff":
         node.set_efficiency(float(arg))
     elif action == "temp":
         node.set_temp(float(arg))
+    elif action == "hold":
+        node.set_hold(None if arg is None else float(arg))
     elif (
         action == "ajar"
-    ):  # door left ajar: the switch reads open, the gap leaks only `arg` per s (None: closed)
-        node.model.params["K_DOOR_PER_S"] = F["K_DOOR_PER_S"] if arg is None else float(arg)
-        node.set_door(arg is not None)
+    ):  # door left ajar: the switch reads open, the gap leaks k per s (None/False: closed)
+        k = AJAR_K if arg is True else None if arg is None or arg is False else float(arg)
+        node.model.params["K_DOOR_PER_S"] = F["K_DOOR_PER_S"] if k is None else k
+        node.set_door(k is not None)
 
 
 def run_offline(

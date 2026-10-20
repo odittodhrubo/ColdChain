@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, TriangleAlert } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAuth } from '../auth/AuthProvider';
 import { can } from '../auth/permissions';
+import { useT } from '../i18n';
 import { api } from '../lib/api';
 import { useActiveAlerts } from '../lib/queries';
 import { ago } from '../lib/time';
@@ -19,6 +20,7 @@ const SEVERITY = {
 } as const;
 
 function AlertRow({ alert, now }: { alert: Alert; now: number }) {
+  const { t } = useT();
   const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -38,7 +40,7 @@ function AlertRow({ alert, now }: { alert: Alert; now: number }) {
           {alert.data.title ?? alert.type}
         </p>
         <p className="figures mt-0.5 text-xs text-ink-3">
-          {ago((now - alert.created_at) / 1000)}
+          {ago((now - alert.created_at) / 1000, t)}
           {alert.fridge_id && (
             <>
               {' · '}
@@ -57,7 +59,7 @@ function AlertRow({ alert, now }: { alert: Alert; now: number }) {
           onClick={() => ack.mutate()}
           className="min-h-9 px-2.5"
         >
-          Ack
+          {t('alertsFeed.ack')}
         </Button>
       )}
     </li>
@@ -65,14 +67,15 @@ function AlertRow({ alert, now }: { alert: Alert; now: number }) {
 }
 
 export function AlertsFeed({ now }: { now: number }) {
+  const { t } = useT();
   const { data, isPending, error, refetch } = useActiveAlerts(8);
   return (
     <Panel
-      title="Open alerts"
+      title={t('summary.openAlerts')}
       bodyClassName=""
       actions={
         <Link to="/alerts" className="text-sm font-semibold text-teal-strong underline">
-          All alerts
+          {t('alertsFeed.all')}
         </Link>
       }
     >
@@ -87,9 +90,7 @@ export function AlertsFeed({ now }: { now: number }) {
           <ErrorState error={error} onRetry={() => void refetch()} />
         </div>
       ) : !data || data.alerts.length === 0 ? (
-        <EmptyState title="No open alerts">
-          Door, power, temperature and budget alerts appear here the moment they fire.
-        </EmptyState>
+        <EmptyState title={t('alertsFeed.emptyTitle')}>{t('alertsFeed.emptyBody')}</EmptyState>
       ) : (
         <ul>
           {data.alerts.map((a) => (
