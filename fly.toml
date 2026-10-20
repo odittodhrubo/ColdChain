@@ -1,21 +1,27 @@
-app = "coldchain"
-primary_region = "sin"
+# fly.toml app configuration file generated for coldchain-35gebg on 2026-10-20T19:36:34Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'coldchain-35gebg'
+primary_region = 'sin'
 
 [build]
 
+[[mounts]]
+  source = 'coldchain_data'
+  destination = '/app/data'
+
 [http_service]
-  internal_port = 4000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
-
-[mounts]
-  source = "coldchain_data"
-  destination = "/app/data"
+  processes = ['app']
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 512
