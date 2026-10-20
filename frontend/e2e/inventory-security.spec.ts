@@ -58,7 +58,10 @@ test('inspector sees no add or move buttons, and the API refuses the write too',
   await expect(page.getByRole('button', { name: 'Add batch' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Move / })).toHaveCount(0);
 
-  const login = await request.post('/api/auth/login', { data: E2E_INSPECTOR });
+  const login = await request.post('/api/auth/login', {
+    data: E2E_INSPECTOR,
+    headers: { 'X-Auth-Mode': 'token' },
+  });
   const { token } = (await login.json()) as { token: string };
   const res = await request.post('/api/batches', {
     headers: { Authorization: `Bearer ${token}` },
@@ -75,15 +78,14 @@ test('inspector sees no add or move buttons, and the API refuses the write too',
 });
 
 test('Verify Integrity is green, then red at the record edited in the database', async ({ page }) => {
-  const python = path.resolve('../.venv/Scripts/python.exe');
+  const root = path.resolve(import.meta.dirname, '../..');
+  const python =
+    [path.join(root, '.venv/Scripts/python.exe'), path.join(root, '.venv/bin/python')].find(existsSync) ??
+    'python';
   const tamper = (...args: string[]) =>
-    execFileSync(
-      existsSync(python) ? python : 'python',
-      ['-m', 'coldchain_tools.tamper', '--db', E2E_DB!, ...args],
-      {
-        cwd: path.resolve('../tools'),
-      },
-    );
+    execFileSync(python, ['-m', 'coldchain_tools.tamper', '--db', E2E_DB!, ...args], {
+      cwd: path.join(root, 'tools'),
+    });
 
   await signIn(page, E2E_ADMIN);
   await page.goto('/audit');

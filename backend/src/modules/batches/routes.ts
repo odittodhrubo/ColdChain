@@ -138,12 +138,15 @@ export function batchRoutes(): RouteDef[] {
       }),
     }),
 
+    // Admin removes a batch from the inventory with a reason (audited). Soft delete: the record stays, the
+    // fridge slot frees, and a discarded batch still reads DISCARD on its QR.
     defineRoute({
       method: 'delete',
       path: '/api/batches/:id',
       access: { permission: 'batch:delete' },
       params: idParams,
-      handler: ({ params, user }, ctx) => deleteBatch(ctx, params.id, user!.id),
+      body: z.strictObject({ reason: z.string().trim().min(3).max(500) }),
+      handler: ({ params, body, user }, ctx) => deleteBatch(ctx, params.id, user!.id, body.reason),
     }),
 
     defineRoute({

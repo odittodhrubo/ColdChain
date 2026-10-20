@@ -13,9 +13,11 @@ export const GENESIS = '0'.repeat(64);
 export const AUDIT_EVENTS = [
   'AUTH_LOGIN', 'AUTH_FAIL', 'USER_CREATED', 'USER_UPDATED', 'USER_DISABLED',
   'BATCH_CREATED', 'BATCH_UPDATED', 'BATCH_MOVED', 'BATCH_STATUS_CHANGED',
-  'LATCH_RESET', 'DISCARD_ACK', 'ALERT_RAISED', 'ALERT_ACKED', 'ALERT_RESOLVED', 'SECURITY_REJECT',
+  'LATCH_RESET', 'DISCARD_ACK', 'ALERT_RAISED', 'ALERT_ACKED', 'ALERT_RESOLVED', 'ALERT_ESCALATED', 'SECURITY_REJECT',
   'RELOCATION_PROPOSED', 'RELOCATION_CONFIRMED', 'RELOCATION_DISMISSED',
-  'DEVICE_EVENT', 'BREACH_START', 'BREACH_END', 'TELEMETRY_CHECKPOINT', 'AUDIT_VERIFY',
+  'DEVICE_EVENT', 'BREACH_START', 'BREACH_END', 'TELEMETRY_CHECKPOINT', 'AUDIT_VERIFY', 'READINGS_RETIRED',
+  'DEVICE_SECRET_ROTATED',
+  'DISPLAY_TOKEN_CREATED', 'DISPLAY_TOKEN_REVOKED', 'REPORT_EXPORTED', 'DEVICE_CALIBRATED',
 ] as const; // prettier-ignore
 export type AuditEventType = (typeof AUDIT_EVENTS)[number];
 
@@ -101,7 +103,10 @@ export interface VerifyResult {
   headId: number;
   headHash: string;
   checkpoints: number;
+  retired?: number; // checkpoint blocks whose readings were deleted by retention (READINGS_RETIRED), not checked
   anchors: number;
+  // S8: the newest anchor that a Time-Stamp Authority also signed (its reply is kept in audit_anchor.tsa_reply)
+  externalAnchor?: { headId: number; at: number; url: string } | null;
   firstBrokenId?: number;
   reason?: VerifyReason;
   expected?: string | number;
@@ -136,6 +141,11 @@ export async function verifyChain(
   let headHash = prevHash;
   let headId = fromId - 1;
   const checkpointRows: AuditRow[] = [];
+  // Ranges retention deleted on purpose, as recorded *in the chain* (a row in readings_retired alone proves
+  // nothing): fridge:from:to:sha256 of the checkpoint each one retired.
+  const retiredRanges = new Set<string>();
+  const rangeKey = (p: { fridge_id: string; from_id: number; to_id: number; sha256: string }) =>
+    `${p.fridge_id}:${p.from_id}:${p.to_id}:${p.sha256}`;
 
   for (let cursor = fromId; ;) {
     const rows = page.all(cursor, chunk) as AuditRow[];
@@ -150,6 +160,7 @@ export async function verifyChain(
       if (recomputed !== row.hash)
         return broken(checked, row.id, headHash, 'HASH_MISMATCH', recomputed, row.hash);
       if (row.event_type === 'TELEMETRY_CHECKPOINT') checkpointRows.push(row);
+      if (row.event_type === 'READINGS_RETIRED') retiredRanges.add(rangeKey(JSON.parse(row.payload)));
       prevHash = headHash = row.hash;
       headId = row.id;
       expectedId += 1;
@@ -173,6 +184,7 @@ export async function verifyChain(
       return broken(checked, a.head_id, headHash, 'ANCHOR_MISMATCH', a.head_hash, actual, headId);
   }
 
+  let retired = 0;
   for (const row of checkpointRows) {
     const p = JSON.parse(row.payload) as {
       fridge_id: string;
@@ -181,17 +193,33 @@ export async function verifyChain(
       sha256: string;
     };
     const actual = readingsDigest(db, p.fridge_id, p.from_id, p.to_id);
-    if (actual !== p.sha256)
-      return broken(checked, row.id, headHash, 'READINGS_TAMPERED', p.sha256, actual, headId);
+    if (actual === p.sha256) continue;
+    // Gone on purpose: retention deleted the whole block and said so in the chain, quoting this very hash.
+    const none = db
+      .prepare('SELECT COUNT(*) FROM readings WHERE fridge_id = ? AND id BETWEEN ? AND ?')
+      .pluck()
+      .get(p.fridge_id, p.from_id, p.to_id);
+    if (none === 0 && retiredRanges.has(rangeKey(p))) {
+      retired += 1;
+      continue;
+    }
+    return broken(checked, row.id, headHash, 'READINGS_TAMPERED', p.sha256, actual, headId);
   }
 
+  const tsa = db
+    .prepare(
+      'SELECT head_id, tsa_at, tsa_url FROM audit_anchor WHERE tsa_reply IS NOT NULL ORDER BY id DESC LIMIT 1',
+    )
+    .get() as { head_id: number; tsa_at: number; tsa_url: string } | undefined;
   return {
     valid: true,
     checked,
     headId,
     headHash,
     checkpoints: checkpointRows.length,
+    retired,
     anchors: anchors.length,
+    externalAnchor: tsa ? { headId: tsa.head_id, at: tsa.tsa_at, url: tsa.tsa_url } : null,
   };
 
   function broken(

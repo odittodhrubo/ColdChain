@@ -5,6 +5,7 @@
 #include "node_config.h"
 
 bool CompressorControl::minOffElapsed(uint32_t now_ms) const {
+  if (boot_locked_ && now_ms - boot_at_ms_ < cc::COMP_MIN_OFF_S * 1000u) return false;
   return !has_switched_off_ || now_ms - changed_at_ms_ >= cc::COMP_MIN_OFF_S * 1000u;
 }
 
@@ -16,6 +17,8 @@ void CompressorControl::set(bool on, uint32_t now_ms) {
 
 bool CompressorControl::update(float temp, bool sensor_fault, bool force_off, uint32_t now_ms) {
   const bool was_on = on_;
+  // the boot lock ends for good once served, so the 49-day millis() rollover can never re-arm it
+  if (boot_locked_ && now_ms - boot_at_ms_ >= cc::COMP_MIN_OFF_S * 1000u) boot_locked_ = false;
   if (force_off) {
     set(false, now_ms);  // re-armed every call, so the 60 s min-off counts from when the force ends
   } else if (sensor_fault) {

@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { FlaskConical } from 'lucide-react';
+import { FlaskConical, Printer } from 'lucide-react';
 import type { ReactNode } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { session } from '../auth/session';
+import { fmt, useT } from '../i18n';
 import { PageHeader } from '../layout/AppShell';
 import { api, ApiError } from '../lib/api';
+import { Button } from '../ui/Button';
 import { Panel } from '../ui/Panel';
 import { ErrorState, Skeleton } from '../ui/States';
 
@@ -46,6 +47,12 @@ interface Report {
   figures: { name: string; url: string }[];
   model_card: { trained_at: string; versions: Record<string, string> } | null;
 }
+interface Accuracy {
+  test_mae: number;
+  drift_factor: number;
+  horizon_min: number;
+  fridges: { fridge_id: string; name: string; mae_24h: number | null; n_24h: number; drift: boolean }[];
+}
 
 /** Figures need the bearer token, so they are fetched and shown as data URLs. */
 function useFigure(url: string | undefined) {
@@ -56,7 +63,7 @@ function useFigure(url: string | undefined) {
     queryFn: async ({ signal }) => {
       const res = await fetch(url!, {
         signal,
-        headers: { Authorization: `Bearer ${session.get()?.token ?? ''}` },
+        credentials: 'same-origin', // the HttpOnly session cookie
       });
       if (!res.ok) throw new ApiError(res.status, `HTTP_${res.status}`, 'Could not load the figure');
       const blob = await res.blob();
@@ -71,10 +78,11 @@ function useFigure(url: string | undefined) {
 }
 
 function Figure({ url, alt }: { url?: string; alt: string }) {
+  const { t } = useT();
   const { data, isPending, error } = useFigure(url);
   if (!url) return null;
   if (isPending) return <Skeleton className="my-3 h-56 w-full" />;
-  if (error) return <p className="my-3 text-sm text-ink-3">Figure not available: {alt}</p>;
+  if (error) return <p className="my-3 text-sm text-ink-3">{fmt(t('ai.figureNa'), { alt })}</p>;
   return (
     <img
       src={data}
@@ -117,7 +125,71 @@ function Importance({ title, items }: { title: string; items: { feature: string;
   );
 }
 
+/** A1: live rolling forecast error per fridge, measured against what actually happened 30 min later. */
+function LiveAccuracy({ offlineMae }: { offlineMae: number }) {
+  const { t } = useT();
+  const { data } = useQuery({
+    queryKey: ['ml-accuracy'],
+    staleTime: 60_000,
+    queryFn: ({ signal }) => api<Accuracy>('/api/ml/accuracy', { signal }),
+  });
+  if (!data) return null;
+  return (
+    <Panel title={t('ai.live.title')}>
+      <p className="figures text-sm text-ink-2">
+        {fmt(t('ai.live.intro'), {
+          m: data.horizon_min,
+          mae: offlineMae.toFixed(2),
+          f: data.drift_factor,
+        })}
+      </p>
+      <table className="figures mt-3 w-full border-collapse text-left text-sm">
+        <caption className="sr-only">{t('ai.live.title')}</caption>
+        <thead className="bg-panel-2">
+          <tr>
+            {[
+              t('ai.live.colFridge'),
+              t('ai.live.colMae'),
+              t('ai.live.colScored'),
+              t('ai.live.colStatus'),
+            ].map((h) => (
+              <th
+                key={h}
+                scope="col"
+                className="border-b border-rule px-3 py-2 text-xs font-semibold text-ink-2"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.fridges.map((f) => (
+            <tr key={f.fridge_id} className="border-b border-rule last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink">{f.name}</td>
+              <td className="px-3 py-2 text-ink">
+                {f.mae_24h === null ? '–' : `${f.mae_24h.toFixed(2)} °C`}
+              </td>
+              <td className="px-3 py-2 text-ink-2">{f.n_24h}</td>
+              <td className="px-3 py-2">
+                {f.mae_24h === null ? (
+                  <span className="text-ink-3">{t('ai.live.noData')}</span>
+                ) : f.drift ? (
+                  <span className="font-semibold text-warning">{t('ai.live.drifting')}</span>
+                ) : (
+                  <span className="font-semibold text-safe">{t('ai.live.inRange')}</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
 export function AiReportPage() {
+  const { t } = useT();
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ['ml-report'],
     staleTime: 5 * 60_000,
@@ -157,11 +229,34 @@ export function AiReportPage() {
     ),
   };
 
+  // Print the report: drop the app chrome (print:hidden + body.printing-report), restore it when done.
+  const printReport = () => {
+    document.body.classList.add('printing-report');
+    const cleanup = () => {
+      document.body.classList.remove('printing-report');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+  };
   return (
     <>
       <PageHeader
-        title="AI Report"
-        subtitle="How the forecast and the compressor health score were built and how well they do"
+        title={t('page.aiReport.title')}
+        subtitle={t('page.aiReport.subtitle')}
+        actions={
+          !isPending &&
+          !error && (
+            <Button
+              variant="secondary"
+              className="print:hidden"
+              icon={<Printer aria-hidden className="size-4" />}
+              onClick={printReport}
+            >
+              {t('ai.print')}
+            </Button>
+          )
+        }
       />
       {isPending ? (
         <div className="flex flex-col gap-4">
@@ -172,9 +267,7 @@ export function AiReportPage() {
         <Panel>
           <ErrorState error={error} onRetry={() => void refetch()} />
           {error instanceof ApiError && error.code === 'ML_UNAVAILABLE' && (
-            <p className="px-4 pb-4 text-sm text-ink-2">
-              The AI service is not running, so its report cannot be shown.
-            </p>
+            <p className="px-4 pb-4 text-sm text-ink-2">{t('ai.unavailable')}</p>
           )}
         </Panel>
       ) : (
@@ -185,6 +278,7 @@ export function AiReportPage() {
 }
 
 function ReportBody({ data, components }: { data: Report; components: Components }) {
+  const { t } = useT();
   const m = data.metrics;
   const f = m.forecast;
   const days = m.dataset.profiles[0]?.days;
@@ -193,7 +287,7 @@ function ReportBody({ data, components }: { data: Report; components: Components
       <p className="flex flex-wrap items-center gap-2 text-sm">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/50 bg-warning-wash px-2.5 py-1 font-semibold text-warning">
           <FlaskConical aria-hidden className="size-4" />
-          Trained on synthetic data
+          {t('ai.synthetic')}
         </span>
         <span className="figures rounded-full bg-panel-2 px-2.5 py-1 text-ink-2">
           model {data.model_card?.trained_at ?? m.trained_at} · scikit-learn{' '}
@@ -202,51 +296,67 @@ function ReportBody({ data, components }: { data: Report; components: Components
       </p>
       <section aria-label="Key results" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
-          label="Forecast error, 30 min ahead"
+          label={t('ai.kpiForecast')}
           value={`${f.models.hgb.mae.toFixed(2)} °C`}
-          sub={`MAE · persistence ${f.models.persistence.mae.toFixed(2)}, linear ${f.models.linear.mae.toFixed(2)}, physics ${f.models.physics.mae.toFixed(2)} · RMSE ${f.models.hgb.rmse.toFixed(2)}`}
+          sub={fmt(t('ai.kpiForecastSub'), {
+            p: f.models.persistence.mae.toFixed(2),
+            l: f.models.linear.mae.toFixed(2),
+            ph: f.models.physics.mae.toFixed(2),
+            r: f.models.hgb.rmse.toFixed(2),
+          })}
         />
         <Kpi
-          label="Breach warnings"
-          value={`${pct(f.breach.recall)} caught`}
-          sub={`precision ${pct(f.breach.precision)} · ${f.breach.false_alarms_per_fridge_day.toFixed(1)} false alarms per fridge-day`}
+          label={t('ai.kpiBreach')}
+          value={fmt(t('ai.kpiBreachVal'), { pct: pct(f.breach.recall) })}
+          sub={fmt(t('ai.kpiBreachSub'), {
+            p: pct(f.breach.precision),
+            fa: f.breach.false_alarms_per_fridge_day.toFixed(1),
+          })}
         />
         <Kpi
-          label="Warning lead time"
+          label={t('ai.kpiLead')}
           value={f.lead_time.median_min == null ? '–' : `${Math.round(f.lead_time.median_min)} min`}
-          sub={`median before 8 °C · ${pct(f.lead_time.warned_share)} of ${f.lead_time.episodes} breaches warned`}
+          sub={fmt(t('ai.kpiLeadSub'), { share: pct(f.lead_time.warned_share), n: f.lead_time.episodes })}
         />
         <Kpi
-          label="Compressor health error"
-          value={`${m.health.final.mae.toFixed(1)} points`}
-          sub={`Spearman ${m.health.spearman.toFixed(2)} · ${m.health.weakening.detected}/${m.health.weakening.arcs_in_test} degradations flagged`}
+          label={t('ai.kpiHealth')}
+          value={fmt(t('ai.kpiHealthVal'), { v: m.health.final.mae.toFixed(1) })}
+          sub={fmt(t('ai.kpiHealthSub'), {
+            s: m.health.spearman.toFixed(2),
+            d: m.health.weakening.detected,
+            a: m.health.weakening.arcs_in_test,
+          })}
         />
       </section>
+      <LiveAccuracy offlineMae={f.models.hgb.mae} />
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Dataset">
+        <Panel title={t('ai.datasetTitle')}>
           <p className="figures text-sm text-ink">
-            {m.dataset.profiles.length} simulated fridges × {days} days ({m.dataset.raw_rows.toLocaleString()}{' '}
-            one-minute rows), from the same physics as the device simulator: door openings, door left ajar,
-            power cuts, compressor wear and faults, sensor noise and gaps. Held out for testing:{' '}
-            {m.dataset.held_out_profiles.join(', ')}.
+            {fmt(t('ai.datasetBody'), {
+              n: m.dataset.profiles.length,
+              days: days ?? '',
+              rows: m.dataset.raw_rows.toLocaleString(),
+              held: m.dataset.held_out_profiles.join(', '),
+            })}
           </p>
           <p className="figures mt-2 text-sm text-ink-2">
-            Interval coverage {pct(f.interval.coverage)} (target 80 %) · {m.dataset.features} forecast
-            features, {m.dataset.health_features} health features
+            {fmt(t('ai.datasetBody2'), {
+              cov: pct(f.interval.coverage),
+              ff: m.dataset.features,
+              hf: m.dataset.health_features,
+            })}
           </p>
         </Panel>
-        <Panel title="What the models look at">
+        <Panel title={t('ai.modelsTitle')}>
           <div className="grid gap-5 sm:grid-cols-2">
-            <Importance title="Forecast" items={m.importance.forecast} />
-            <Importance title="Compressor health" items={m.importance.health} />
+            <Importance title={t('ai.modelsForecast')} items={m.importance.forecast} />
+            <Importance title={t('ai.modelsHealth')} items={m.importance.health} />
           </div>
-          <p className="mt-3 text-xs text-ink-3">
-            Bar = how much the error grows when that input is shuffled.
-          </p>
+          <p className="mt-3 text-xs text-ink-3">{t('ai.modelsBar')}</p>
         </Panel>
       </div>
-      <Panel title="Full report">
-        <article className="max-w-[72ch]">
+      <Panel title={t('ai.fullReport')}>
+        <article className="mx-auto max-w-[72ch]">
           <Markdown remarkPlugins={[remarkGfm]} components={components}>
             {data.report_md}
           </Markdown>

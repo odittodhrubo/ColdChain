@@ -17,6 +17,9 @@ class EnvelopeGuard {
 
   EnvelopeGuard(const char* device_id, const char* secret) : device_id_(device_id), secret_(secret) {}
 
+  // After a ROTATE_SECRET (S7): verify with the new secret from now on. The pointer must stay valid.
+  void setSecret(const char* secret) { secret_ = secret; }
+
   // On OK, body receives the parsed body object. now_unix = 0 means the clock is not valid yet.
   Verdict verify(const char* json, const char* expected_kind, uint32_t now_unix, JsonDocument& body);
 
@@ -31,5 +34,5 @@ class EnvelopeGuard {
 };
 
 // Commands the device accepts (contract section 5). Anything else is rejected after authentication.
-enum class CmdType { RESET_LATCH, SET_LATCH, BUZZER_TEST, SYNC_REQUEST, UNKNOWN };
+enum class CmdType { RESET_LATCH, SET_LATCH, BUZZER_TEST, SYNC_REQUEST, ROTATE_SECRET, SET_CALIBRATION, UNKNOWN };
 CmdType parseCmdType(const char* s);

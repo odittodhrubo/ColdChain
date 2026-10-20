@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { type BatchInput, createBatch } from '../src/modules/batches/service';
 import { MAX_POINTS } from '../src/modules/fridges/service';
 import { envelope, NOW, nowS, reading, setup, telemetry, topic } from './deviceHelpers';
-import { addUser, batchInput, bearer, tokenFor } from './helpers';
+import type { AppContext } from '../src/shared/http';
+import { addFridge, addUser, batchInput, bearer, makeApp, tokenFor } from './helpers';
 
 async function as(s: ReturnType<typeof setup>, role: 'ADMIN' | 'INSPECTOR' = 'INSPECTOR') {
   return bearer(tokenFor(s.t, await addUser(s.t, role)));
@@ -125,5 +126,68 @@ describe('fridges read API', () => {
       .set(auth);
     expect(fine.body.points).toHaveLength(61);
     expect((await s.t.http().get(`/api/fridges/fridge-01/readings?from=10&to=5`).set(auth)).status).toBe(400);
+  });
+});
+
+describe('manual (simulation) controls', () => {
+  async function simApp(env: Record<string, string> = { SIM_CONTROLS: '1' }) {
+    const t = makeApp(env);
+    const sent: [string, string][] = [];
+    (t.app.locals.ctx as AppContext).simPublish = (topic, payload) => sent.push([topic, payload]);
+    const auth = bearer(tokenFor(t, await addUser(t, 'PHARMACIST')));
+    const fridge = addFridge(t);
+    t.db
+      .prepare(
+        "INSERT INTO devices (device_id, fridge_id, secret_enc, created_at) VALUES ('node-7', ?, 'x', 0)",
+      )
+      .run(fridge);
+    const post = (body: object) => t.http().post(`/api/fridges/${fridge}/sim`).set(auth).send(body);
+    return { t, sent, post };
+  }
+
+  it("publishes each action to the sim topic of the fridge's node, with its value", async () => {
+    const { t, sent, post } = await simApp();
+    for (const body of [
+      { action: 'door', value: true },
+      { action: 'hold', value: 11.5 },
+      { action: 'hold', value: null },
+      { action: 'power', value: true },
+    ])
+      expect((await post(body)).status).toBe(200);
+    const want = `${t.config.MQTT_TOPIC_PREFIX}/node-7/sim`; // the device id the node listens on, not the fridge id
+    expect(sent.map(([topic, p]) => [topic === want, JSON.parse(p)])).toEqual([
+      [true, { action: 'door', arg: true }],
+      [true, { action: 'hold', arg: 11.5 }],
+      [true, { action: 'hold', arg: null }],
+      [true, { action: 'power', arg: true }],
+    ]);
+  });
+
+  it('rejects a value of the wrong shape or range before it reaches the node', async () => {
+    const { sent, post } = await simApp();
+    for (const body of [
+      { action: 'door', value: 1 },
+      { action: 'temp', value: 99 },
+      { action: 'eff', value: 0 },
+      { action: 'power' },
+      { action: 'reboot', value: true },
+    ])
+      expect((await post(body)).status).toBe(400);
+    expect(sent).toEqual([]);
+  });
+
+  it('is a 404 when SIM_CONTROLS is off, and the detail tells the UI to hide the panel', async () => {
+    const { t, sent, post } = await simApp({});
+    expect((await post({ action: 'door', value: true })).status).toBe(404);
+    expect(sent).toEqual([]);
+    const auth = bearer(tokenFor(t, await addUser(t, 'INSPECTOR')));
+    expect(
+      (
+        await t
+          .http()
+          .get(`/api/fridges/${addFridge(t)}`)
+          .set(auth)
+      ).body.sim_controls,
+    ).toBe(false);
   });
 });

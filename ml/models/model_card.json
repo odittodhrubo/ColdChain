@@ -1,6 +1,10 @@
 {
   "trained_at": "2026-10-18T08:07:08Z",
   "seed": 7,
+  "files": {
+    "forecast.joblib": "abc419f3a6a1fefd1d055a161b4b565b35df9a3d465a12e21b48915d77872e62",
+    "health.joblib": "3f0bf6c1173eed1455909da8d6831cb29cfe4b9358b5550b838c22bdcc08ea85"
+  },
   "versions": {
     "python": "3.14.6",
     "scikit-learn": "1.9.1",

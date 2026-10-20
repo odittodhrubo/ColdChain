@@ -17,6 +17,10 @@ export const E2E_INSPECTOR = { email: 'inspector@coldchain.local', password: 'E2
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000, // the AI flow sets its own, longer budget
+  // A first render after sign-in can take ~6 s when every spec runs at once: three bcrypt logins (cost 12)
+  // in parallel, then Vite transforming the lazy page on demand. Measured 2026-10-18; a single run is < 1 s.
+  expect: { timeout: 10_000 },
+  workers: 3, // each spec runs a browser next to the backend, the ML service and the reading feeder
   use: { baseURL: `http://localhost:${WEB_PORT}`, trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
@@ -40,6 +44,8 @@ export default defineConfig({
         ML_INTERVAL_MS: '5000', // the AI flow should not wait for 30 s ticks
         DEMO_TIME_SCALE: '1',
         CORS_ORIGIN: `http://localhost:${WEB_PORT}`,
+        LOGIN_RATE_LIMIT_PER_MIN: '100', // every spec signs in from 127.0.0.1 within a minute
+        BCRYPT_COST: '10', // the floor (as in the backend unit tests): parallel sign-ins at 12 took ~3 s each
         SEED_ADMIN_PASSWORD: E2E_ADMIN.password,
         SEED_PHARMACIST_PASSWORD: E2E_PHARMACIST.password,
         SEED_INSPECTOR_PASSWORD: E2E_INSPECTOR.password,

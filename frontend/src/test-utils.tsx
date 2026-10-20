@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react';
 import { vi } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { AppRoutes, Providers } from './App';
 import type { Role } from './auth/permissions';
 import { session } from './auth/session';
@@ -24,7 +24,6 @@ export class FakeSocket implements SocketLike {
 
 export function signIn(role: Role, expiresInS = 3600) {
   session.set({
-    token: `token-${role}`,
     expiresAt: Math.floor(Date.now() / 1000) + expiresInS,
     user: { id: 1, email: `${role.toLowerCase()}@coldchain.local`, name: `Test ${role}`, role },
   });

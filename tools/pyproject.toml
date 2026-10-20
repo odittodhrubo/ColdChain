@@ -6,21 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "coldchain-tools"
 version = "0.1.0"
 description = "ColdChain virtual fridge node, simulation engine, attack and tamper tools"
-requires-python = ">=3.11"
+requires-python = ">=3.12"  # installed into the same venv as ml/ (numpy 2.5 needs 3.12+)
 dependencies = ["paho-mqtt>=2.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "platformio>=6.1"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "platformio>=6.1"]
 
 [tool.setuptools]
 packages = ["coldchain_tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Q1: fail the suite if coverage drops below the measured value minus 2.
+addopts = "--cov=coldchain_tools --cov-report=term-missing --cov-report=xml --cov-fail-under=41"
 
 [tool.ruff]
 line-length = 110
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

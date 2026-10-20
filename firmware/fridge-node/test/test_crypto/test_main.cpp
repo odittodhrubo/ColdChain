@@ -69,7 +69,7 @@ void test_constant_time_equal() {
 }
 
 void test_telemetry_body_matches_contract_shape() {
-  Reading r{1204, 1767225600, 4.62f, false, true, false, 100, FridgeState::SAFE, 0, false, false, false};
+  Reading r{1204, 1767225600, 4.62f, false, true, false, 100, FridgeState::SAFE, 0, false, false, false, NAN};
   LiveExtras live{0, -58};
   char body[512];
   TEST_ASSERT_GREATER_THAN(0, msg::telemetryBody(r, &live, body, sizeof body));
@@ -78,7 +78,7 @@ void test_telemetry_body_matches_contract_shape() {
 }
 
 void test_sync_reading_omits_live_fields_and_null_temp() {
-  Reading r{7, 100, NAN, true, false, true, 92, FridgeState::BREACH, 30, false, true, true};
+  Reading r{7, 100, NAN, true, false, true, 92, FridgeState::BREACH, 30, false, true, true, NAN};
   char body[512];
   msg::telemetryBody(r, nullptr, body, sizeof body);
   TEST_ASSERT_EQUAL_STRING(
@@ -108,6 +108,28 @@ void test_topic_and_nonce() {
   TEST_ASSERT_EQUAL_STRING("9f2c1a7b05d3e4f6", n);
 }
 
+void test_rotate_open_matches_the_shared_vectors() {
+  for (size_t i = 0; i < vectors::ROTATE_COUNT; i++) {
+    const auto& v = vectors::ROTATE[i];
+    char out[crypto::SIG_HEX_LEN + 1] = "";
+    TEST_ASSERT_TRUE(crypto::rotateOpen(v.old_secret, v.nonce, v.ct, v.tag, out));
+    TEST_ASSERT_EQUAL_STRING(v.new_secret, out);
+  }
+}
+
+void test_rotate_open_refuses_a_wrong_key_tag_or_shape() {
+  const auto& v = vectors::ROTATE[0];
+  char out[crypto::SIG_HEX_LEN + 1] = "untouched";
+  TEST_ASSERT_FALSE(crypto::rotateOpen(vectors::ROTATE[1].old_secret, v.nonce, v.ct, v.tag, out));  // other key
+  char ct[crypto::SIG_HEX_LEN + 1];
+  strcpy(ct, v.ct);
+  ct[0] = ct[0] == 'a' ? 'b' : 'a';  // one flipped digit
+  TEST_ASSERT_FALSE(crypto::rotateOpen(v.old_secret, v.nonce, ct, v.tag, out));
+  TEST_ASSERT_FALSE(crypto::rotateOpen(v.old_secret, "short", v.ct, v.tag, out));
+  TEST_ASSERT_FALSE(crypto::rotateOpen(v.old_secret, v.nonce, v.ct, "ZZ", out));
+  TEST_ASSERT_EQUAL_STRING("untouched", out);  // nothing written on failure
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_rfc4231_case2);
@@ -121,5 +143,7 @@ int main() {
   RUN_TEST(test_event_body);
   RUN_TEST(test_cmdack_body);
   RUN_TEST(test_topic_and_nonce);
+  RUN_TEST(test_rotate_open_matches_the_shared_vectors);
+  RUN_TEST(test_rotate_open_refuses_a_wrong_key_tag_or_shape);
   return UNITY_END();
 }

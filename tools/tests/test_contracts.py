@@ -45,3 +45,17 @@ def test_hmac_vectors_verify_in_python():
         assert msg == v["signing_string"]
         sig = hmac.new(v["secret"].encode(), msg.encode(), hashlib.sha256).hexdigest()
         assert hmac.compare_digest(sig, v["sig"]), v["name"]
+
+
+def test_rotate_vectors_seal_and_open_in_python():
+    """S7: the virtual node opens what the backend seals, byte for byte with Node and the firmware."""
+    from coldchain_tools.envelope import rotate_open, rotate_seal
+
+    assert len(VECTORS["rotate"]) == 2
+    for v in VECTORS["rotate"]:
+        assert rotate_seal(v["old_secret"], v["new_secret"], v["nonce"]) == (v["ct"], v["tag"])
+        assert rotate_open(v["old_secret"], v["nonce"], v["ct"], v["tag"]) == v["new_secret"]
+        flipped = ("b" if v["ct"][0] == "a" else "a") + v["ct"][1:]
+        assert rotate_open(v["old_secret"], v["nonce"], flipped, v["tag"]) is None
+        assert rotate_open(VECTORS["rotate"][0]["new_secret"], v["nonce"], v["ct"], v["tag"]) is None
+        assert rotate_open(v["old_secret"], "short", v["ct"], v["tag"]) is None

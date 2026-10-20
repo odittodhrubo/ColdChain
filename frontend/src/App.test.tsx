@@ -3,6 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { session } from './auth/session';
 import { DEFAULT_ROUTES, mockApi, renderApp, signIn } from './test-utils';
+// the routes these tests land on are lazy: load them up front, so no test pays for transforming the chunk
+// (seconds when every suite runs at once, which timed the login test out)
+import './pages/AlertsPage';
+import './pages/DashboardPage';
 import { StatusChip } from './ui/StatusChip';
 import { STATUS, type Status } from './ui/status';
 
@@ -125,7 +129,10 @@ describe('login', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('heading', { name: 'Alerts' })).toBeInTheDocument(); // back where they were going
-    expect(JSON.parse(sessionStorage.getItem('coldchain.session')!).token).toBe('jwt-1');
+    // the session cookie is HttpOnly: even a token in the response body never lands in storage
+    const stored = sessionStorage.getItem('coldchain.session')!;
+    expect(JSON.parse(stored).user.role).toBe('PHARMACIST');
+    expect(stored).not.toContain('jwt-1');
     expect(Object.keys(localStorage).some((k) => (localStorage.getItem(k) ?? '').includes('jwt-1'))).toBe(
       false,
     );
@@ -194,27 +201,34 @@ describe('shell', () => {
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(before)); // refetched without the socket
   });
 
-  it('opens one socket with the JWT and closes it on sign out', async () => {
+  it('opens one socket per session (cookie auth, no token handed over) and closes it on sign out', async () => {
     mockApi({ ...DEFAULT_ROUTES, ...me('ADMIN'), 'POST /api/auth/logout': { status: 204 } });
     signIn('ADMIN');
-    const tokens: string[] = [];
+    const keys: string[] = [];
     const { FakeSocket } = await import('./test-utils');
     const sock = new FakeSocket();
     const { Providers, AppRoutes } = await import('./App');
-    const { MemoryRouter } = await import('react-router-dom');
+    const { MemoryRouter } = await import('react-router');
     render(
       <MemoryRouter>
-        <Providers connect={(t) => (tokens.push(t), sock)}>
+        <Providers connect={(k) => (keys.push(k), sock)}>
           <AppRoutes />
         </Providers>
       </MemoryRouter>,
     );
     await screen.findByRole('button', { name: /Test ADMIN/ });
-    expect(tokens).toEqual(['token-ADMIN']);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^1:\d+$/); // user id and session expiry: a new session opens a new socket
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /Test ADMIN/ }));
     await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
     await waitFor(() => expect(sock.disconnected).toBe(true));
+    // logout goes to the server with the cookie; the page never had a token to send
+    const logout = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls.find(
+      ([u]) => u === '/api/auth/logout',
+    );
+    expect(logout?.[1]).toMatchObject({ method: 'POST', credentials: 'same-origin' });
+    expect(JSON.stringify(logout?.[1].headers ?? {})).not.toMatch(/Authorization/);
   });
 });
 

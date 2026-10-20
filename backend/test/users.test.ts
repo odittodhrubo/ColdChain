@@ -106,6 +106,29 @@ describe('users (admin)', () => {
   });
 });
 
+describe('display tokens (P1)', () => {
+  it('creates a 30-day read-only token, keeps displays out of the people list, and revokes', async () => {
+    const { t, auth } = await adminApp();
+    const res = await t.http().post('/api/displays').set(auth).send({ label: 'Pharmacy wall screen' });
+    expect(res.status).toBe(201);
+    expect(res.body.display).toMatchObject({ label: 'Pharmacy wall screen', active: true });
+    expect(res.body.url).toContain('/display#token=');
+    // Long-lived: still valid well past a day (a wall screen must not log out overnight).
+    expect(res.body.expiresAt * 1000 - Date.now()).toBeGreaterThan(24 * 3600_000);
+
+    const display = bearer(res.body.token);
+    expect((await t.http().get('/api/alerts?status=all').set(display)).status).toBe(200); // reads: ok
+    expect((await t.http().post('/api/users').set(display).send({})).status).toBe(403); // writes: refused
+    expect((await t.http().get('/api/users').set(auth)).body.users.some((u: { role: string }) => u.role === 'DISPLAY')).toBe(false);
+
+    const id = res.body.display.id;
+    expect((await t.http().post(`/api/displays/${id}/revoke`).set(auth)).body.display.active).toBe(false);
+    // Revoked: the (still-unexpired) token no longer authenticates.
+    expect((await t.http().get('/api/alerts?status=all').set(display)).status).toBe(401);
+    expect((await t.http().get('/api/displays').set(auth)).body.displays).toHaveLength(1);
+  });
+});
+
 describe('seed', () => {
   it('creates 3 users, 2 fridges, 2 devices with encrypted secrets, and is idempotent', async () => {
     const config = loadConfig({ ...validEnv, BCRYPT_COST: '10' });

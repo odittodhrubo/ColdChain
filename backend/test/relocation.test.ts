@@ -71,6 +71,22 @@ describe('relocation planner', () => {
     expect([a, b, c, d].sort(priority)).toEqual([d, c, b, a]);
   });
 
+  it('FEFO when risk is equal: with one free slot, the soonest-expiring batch moves (A4)', () => {
+    // same budget and criticality: expiry alone decides which batch gets the single safe slot
+    const soon = batch({ name: 'Soon', remaining_pct: 60, criticality: 2, expiry_date: '2027-02-01' });
+    const later = batch({ name: 'Later', remaining_pct: 60, criticality: 2, expiry_date: '2027-09-01' });
+    const plan = planFor('fridge-a', [hot, fridge({ capacity: 4, load: 3 })], [later, soon])!;
+    expect(plan.moves.map((m) => m.batch_name)).toEqual(['Soon']);
+    expect(plan.shortfall.map((s) => s.batch_name)).toEqual(['Later']);
+  });
+
+  it('weighs destination capacity and the destination’s own forecast (A4)', () => {
+    expect(targetProblem(fridge({ capacity: 6, load: 6 }))).toBe('full'); // capacity
+    expect(targetProblem(fridge({ prediction: { level: 'MEDIUM', pred: 7, p90: 8.2, health: 90, minutes_to_breach: null, source: 'model' } }))).toMatch(
+      /own forecast is MEDIUM/,
+    ); // never move into a fridge about to breach
+  });
+
   it('never moves a discarded batch: it is listed as unsaveable', () => {
     const plan = planFor('fridge-a', [hot, fridge()], [batch({ status: 'DISCARD', name: 'Old' }), batch()])!;
     expect(plan.moves).toHaveLength(1);

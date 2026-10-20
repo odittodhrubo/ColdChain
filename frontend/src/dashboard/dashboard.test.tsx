@@ -109,7 +109,7 @@ describe('heat budget bar', () => {
 
 describe('fridge card', () => {
   async function renderCard(role: 'ADMIN' | 'PHARMACIST', l: LiveState, latch = false) {
-    const { MemoryRouter } = await import('react-router-dom');
+    const { MemoryRouter } = await import('react-router');
     const { Providers } = await import('../App');
     const { FakeSocket, mockApi, signIn } = await import('../test-utils');
     const { FridgeCard } = await import('./FridgeCard');
@@ -128,6 +128,7 @@ describe('fridge card', () => {
       capacity: 20,
       latch,
       device_id: 'fridge-01',
+      calibration_offset_c: 0,
       load: 3,
       batch_counts: { SAFE: 3, AT_RISK: 0, DISCARD: 0 },
       status: 'SAFE',
@@ -180,5 +181,103 @@ describe('fridge card', () => {
     expect(await screen.findByText('Vaccine Fridge A: latch cleared')).toBeInTheDocument();
     const post = calls.find((c) => c.method === 'POST')!;
     expect(JSON.parse(post.init.body as string)).toEqual({ reason: 'vials destroyed' });
+  });
+});
+
+describe('manual (simulation) controls', () => {
+  async function renderPanel(l: LiveState | null) {
+    const { MemoryRouter } = await import('react-router');
+    const { Providers } = await import('../App');
+    const { FakeSocket, mockApi, signIn } = await import('../test-utils');
+    const { SimControls } = await import('./SimControls');
+    const api = mockApi({
+      'GET /api/auth/me': {
+        status: 200,
+        body: { user: { id: 1, email: 'x', name: 'T', role: 'PHARMACIST' } },
+      },
+      'POST /api/fridges/fridge-01/sim': { status: 200, body: { ok: true } },
+    });
+    signIn('PHARMACIST');
+    const f: Fridge = {
+      id: 'fridge-01',
+      name: 'Vaccine Fridge A',
+      capacity: 20,
+      latch: false,
+      device_id: 'fridge-01',
+      calibration_offset_c: 0,
+      load: 3,
+      batch_counts: { SAFE: 3, AT_RISK: 0, DISCARD: 0 },
+      status: 'SAFE',
+      live: l,
+    };
+    render(
+      <MemoryRouter>
+        <Providers connect={() => new FakeSocket()}>
+          <SimControls fridge={f} now={NOW} />
+        </Providers>
+      </MemoryRouter>,
+    );
+    const userEvent = (await import('@testing-library/user-event')).default;
+    const sent = () =>
+      api.calls.filter((c) => c.method === 'POST').map((c) => JSON.parse(c.init.body as string));
+    return { user: userEvent.setup(), sent };
+  }
+
+  it('each button sends one explicit action, chosen from the live state', async () => {
+    const { user, sent } = await renderPanel(live());
+    await user.click(screen.getByRole('button', { name: 'Open door' }));
+    await user.click(screen.getByRole('button', { name: 'Cut mains power' }));
+    await user.click(screen.getByRole('button', { name: 'Breach · 10 °C' })); // holds by default
+    await user.click(screen.getByLabelText('Hold the reading'));
+    await user.click(screen.getByRole('button', { name: 'Raise by 0.5 °C' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' })); // 5 + 0.5, a one-off jump now
+    await user.click(screen.getByRole('button', { name: 'Cut Wi-Fi' }));
+    expect(await screen.findByRole('button', { name: 'Restore Wi-Fi' })).toBeInTheDocument();
+    expect(sent()).toEqual([
+      { action: 'door', value: true },
+      { action: 'power', value: true },
+      { action: 'hold', value: 10 },
+      { action: 'temp', value: 5.5 },
+      { action: 'wifi', value: true },
+    ]);
+  });
+
+  it('counts down to the door alarm, then shows the door-open-too-long message with a close button', async () => {
+    await renderPanel(live({ door: 1, door_open_at: NOW_S - 42 }));
+    expect(screen.getByText('Open for 00:42')).toBeInTheDocument();
+    expect(screen.getByText('Door alarm in 18 s if it stays open')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('door open past the alarm time: an alert message, and one click closes it', async () => {
+    const { user, sent } = await renderPanel(live({ door: 1, door_open_at: NOW_S - 75 }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Door open too long');
+    expect(screen.getByText('Open for 01:15 · alarm')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close door now' }));
+    expect(sent()).toEqual([{ action: 'door', value: false }]);
+  });
+
+  it('a held reading, battery and a weak compressor show as the node reports them', async () => {
+    const { user, sent } = await renderPanel(
+      live({ mode: 'manual', temp: 11.5, power: 'BATTERY', batt: 64 }),
+    );
+    expect(screen.getByText('Held at 11.5 °C')).toBeInTheDocument();
+    expect(screen.getByText('Battery · 64 %')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Restore mains' }));
+    await user.click(screen.getByRole('button', { name: 'Release hold' }));
+    expect(sent()).toEqual([
+      { action: 'power', value: false },
+      { action: 'hold', value: null },
+    ]);
+  });
+
+  it('refuses an out-of-range custom temperature before sending', async () => {
+    const { user, sent } = await renderPanel(live());
+    const field = screen.getByLabelText('Custom (°C)');
+    await user.clear(field);
+    await user.type(field, '99');
+    expect(screen.getByText('Enter -30 to 40 °C')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    expect(sent()).toEqual([]);
   });
 });

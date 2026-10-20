@@ -14,9 +14,10 @@ namespace uplink {
 using CommandHandler = bool (*)(CmdType type, char* detail, size_t cap);
 void onCommand(CommandHandler handler);
 
-// Picks this device's secret, runs the HMAC self-test and starts the network task.
+// Picks this device's secret, runs the HMAC self-test and starts the network task. reset_reason goes into
+// the BOOT event ({"fw","reset"}), so a watchdog or brownout reset shows on the dashboard and in the audit.
 // Returns false when networking is disabled (self-test failed or no secret); control keeps running either way.
-bool begin(const char* device_id);
+bool begin(const char* device_id, const char* reset_reason = "UNKNOWN");
 
 // Fills seq and ts, then publishes live telemetry, or buffers it (same seq) while the uplink is down or the
 // publish fails. Dropped only before the clock was ever valid (no ts to give it).

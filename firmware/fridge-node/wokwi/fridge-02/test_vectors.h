@@ -93,4 +93,27 @@ constexpr ExposureVector EXPOSURE[] = {
 };
 constexpr size_t EXPOSURE_COUNT = sizeof(EXPOSURE) / sizeof(EXPOSURE[0]);
 
+// ROTATE_SECRET args: the new secret sealed under the old one (S7).
+struct RotateVector {
+  const char* old_secret;
+  const char* new_secret;
+  const char* nonce;
+  const char* ct;
+  const char* tag;
+};
+
+constexpr RotateVector ROTATE[] = {
+    {"601ab310e214eaf2a2b944de22e908c1b8c64df6be1d64d0623d37bf6287c47f",
+     "50153fccb2a089a332ee2b070a77558427dceea68018e9c1918950ea565fc47f",
+     "0123456789abcdef0123456789abcdef",
+     "bcc5d2ad502904e0edf612f288994c699e0cfd2e192005b2bed59f9f085c0c34",
+     "a2c2068ca6f57d7972eaa5e777a0450775ee235707801d21d65df6e571d740e5"},
+    {"806f00da87d2f347796982a5d3533482aaf0ecd7cf31015ac816d705ffb6c859",
+     "01db16e7b47802dc97300953b8515da158d391e4a50ea28a209c12fa438c9a41",
+     "ffeeddccbbaa99887766554433221100",
+     "6ab20bb0a50e5fe43d32437acd562e462551abf3e4f5f2e4c1f2e5324141c7f9",
+     "7d3d54b4c13b3d1d894580b63186faf1e809ff4d0f67bf77c802eae5283923e3"},
+};
+constexpr size_t ROTATE_COUNT = sizeof(ROTATE) / sizeof(ROTATE[0]);
+
 }  // namespace vectors

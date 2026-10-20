@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { useT } from '../i18n';
 import { useFridgeBatches } from '../lib/queries';
 import type { Batch, Fridge } from '../lib/types';
 import { Panel } from '../ui/Panel';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 import { StatusChip } from '../ui/StatusChip';
 import { BatchDrawer } from './BatchDrawer';
-import { ACCRUAL_LABEL, accrual, budgetTone } from './logic';
+import { accrual, budgetTone } from './logic';
 
 const TONE_INK = {
   safe: 'var(--safe)',
@@ -39,13 +40,14 @@ export function BudgetBar({ remaining }: { remaining: number }) {
 
 /** Every batch in the fridge, lowest remaining budget first; a row opens its exposure chart. */
 export function BudgetPanel({ fridge, now }: { fridge: Fridge; now: number }) {
+  const { t } = useT();
   const { data, isPending, error, refetch } = useFridgeBatches(fridge.id);
   const [open, setOpen] = useState<Batch | null>(null);
   const mode = accrual(fridge, now);
   const rows = [...(data?.batches ?? [])].sort((a, b) => a.remaining_pct - b.remaining_pct);
 
   return (
-    <Panel title={`Heat budget · ${fridge.name}`} bodyClassName="px-2 pb-2">
+    <Panel title={`${t('budget.title')} · ${fridge.name}`} bodyClassName="px-2 pb-2">
       {isPending ? (
         <div className="flex flex-col gap-2 p-2">
           {[0, 1, 2].map((i) => (
@@ -57,9 +59,7 @@ export function BudgetPanel({ fridge, now }: { fridge: Fridge; now: number }) {
           <ErrorState error={error} onRetry={() => void refetch()} />
         </div>
       ) : rows.length === 0 ? (
-        <EmptyState title="No batches in this fridge">
-          Batches added to this fridge show their heat budget here.
-        </EmptyState>
+        <EmptyState title={t('budget.emptyTitle')}>{t('budget.emptyBody')}</EmptyState>
       ) : (
         <ul className="flex flex-col">
           {rows.map((b) => (
@@ -75,17 +75,21 @@ export function BudgetPanel({ fridge, now }: { fridge: Fridge; now: number }) {
                   >
                     {b.name}
                   </span>
-                  <span className="figures block text-xs text-ink-3">Lot {b.lot_number}</span>
+                  <span className="figures block text-xs text-ink-3">
+                    {t('budget.lot')} {b.lot_number}
+                  </span>
                 </span>
                 <StatusChip status={b.status} used={1 - b.remaining_pct / 100} size="sm" />
                 <span className="col-span-2 flex items-center gap-3">
                   <BudgetBar remaining={b.remaining_pct} />
                   <span className="figures w-40 shrink-0 text-right text-xs text-ink-2">
-                    {Math.round(b.remaining_pct)} % · {b.used_minutes} of 60 min used
+                    {t('budget.used')
+                      .replace('{p}', String(Math.round(b.remaining_pct)))
+                      .replace('{u}', String(b.used_minutes))}
                   </span>
                 </span>
                 <span className="col-span-2 text-xs text-ink-3">
-                  {b.status === 'DISCARD' ? 'Discard: do not use this batch' : ACCRUAL_LABEL[mode]}
+                  {b.status === 'DISCARD' ? t('budget.discardRow') : t(`accrual.${mode}`)}
                 </span>
               </button>
             </li>

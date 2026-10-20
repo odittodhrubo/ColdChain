@@ -172,6 +172,44 @@ describe('dedupe, re-notification and acknowledgement', () => {
   });
 });
 
+describe('escalation (P3)', () => {
+  it('an unacknowledged alert escalates once after ESCALATE_AFTER_S; an ack stops it', async () => {
+    const s = withTelegram();
+    s.ctx.config.ESCALATE_AFTER_S = 600; // 10 min
+    const t0 = 2_000_000_000_000;
+    s.ctx.alerts.raise(
+      { type: 'FRIDGE_BREACH', severity: 'CRITICAL', fridgeId: 'fridge-01', title: 'Temperature outside 2–8 °C', lines: [] },
+      t0,
+    );
+    await flush();
+    s.ctx.alerts.tick(t0 + 599_000); // renotify may fire, but not escalation yet
+    await flush();
+    expect(s.alerts()[0].escalated_at).toBeNull();
+    s.ctx.alerts.tick(t0 + 600_000); // escalates
+    await flush();
+    expect(sentTexts(s.fetchImpl).at(-1)).toContain('ESCALATED (unacknowledged 10 min): Temperature outside');
+    expect(s.alerts()[0].escalated_at).not.toBeNull();
+    expect(
+      s.t.db.prepare("SELECT COUNT(*) FROM audit_log WHERE event_type = 'ALERT_ESCALATED'").pluck().get(),
+    ).toBe(1);
+    s.ctx.alerts.tick(t0 + 2 * 3600_000); // never escalates twice
+    await flush();
+    expect(
+      s.t.db.prepare("SELECT COUNT(*) FROM audit_log WHERE event_type = 'ALERT_ESCALATED'").pluck().get(),
+    ).toBe(1);
+
+    const acked = s.ctx.alerts.raise(
+      { type: 'FRIDGE_OFFLINE', severity: 'WARNING', fridgeId: 'fridge-02', title: 'Offline', lines: [] },
+      t0,
+    );
+    s.ctx.alerts.ack(acked.id, (await addUser(s.t, 'ADMIN')).id, t0 + 60_000);
+    s.ctx.alerts.tick(t0 + 3600_000);
+    expect(
+      s.t.db.prepare('SELECT escalated_at FROM alerts WHERE id = ?').pluck().get(acked.id),
+    ).toBeNull();
+  });
+});
+
 describe('alert sources', () => {
   it('breach after 2 consecutive out-of-range readings, resolved back in range, audited', () => {
     const s = withTelegram();

@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Copy, Printer } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../lib/api';
-import { session } from '../auth/session';
 import type { Batch } from '../lib/types';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
@@ -18,7 +17,7 @@ function useQrImage(batchId: number, enabled: boolean) {
     queryFn: async ({ signal }) => {
       const res = await fetch(`/api/batches/${batchId}/qr?format=svg`, {
         signal,
-        headers: { Authorization: `Bearer ${session.get()?.token ?? ''}` },
+        credentials: 'same-origin', // the HttpOnly session cookie
       });
       if (!res.ok) throw new ApiError(res.status, `HTTP_${res.status}`, 'Could not load the QR code');
       return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(await res.text())}`;
@@ -99,6 +98,7 @@ export function QrDialog({ batch, open, onClose }: { batch: Batch; open: boolean
             <p>Lot {batch.lot_number}</p>
             <p>Expires {batch.expiry_date}</p>
             <p>Scan to check status</p>
+            {link && <p className="print-label-url">{link}</p>}
           </div>,
           document.body,
         )}

@@ -186,3 +186,56 @@ bool crypto::constTimeEqual(const char* a, const char* b) {
   for (size_t i = 0; i < la && i < lb; i++) diff |= uint8_t(a[i] ^ b[i]);
   return diff == 0;
 }
+
+namespace {
+int hexNibble(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;  // lowercase hex only, as every secret and signature here
+}
+bool isHex(const char* s, size_t len) {
+  if (!s || strlen(s) != len) return false;
+  for (size_t i = 0; i < len; i++)
+    if (hexNibble(s[i]) < 0) return false;
+  return true;
+}
+}  // namespace
+
+namespace crypto {
+
+bool rotateOpen(const char* old_secret, const char* nonce, const char* ct_hex, const char* tag_hex,
+                char out_secret[SIG_HEX_LEN + 1]) {
+  if (!old_secret || !isHex(nonce, 32) || !isHex(ct_hex, SIG_HEX_LEN) || !isHex(tag_hex, SIG_HEX_LEN))
+    return false;
+  char tag[SIG_HEX_LEN + 1];
+  {
+    Hmac h;
+    h.begin(old_secret);
+    h.update("coldchain-rotate-tag|");
+    h.update(nonce);
+    h.update("|");
+    h.update(ct_hex);
+    h.finishHex(tag);
+  }
+  if (!constTimeEqual(tag, tag_hex)) return false;  // altered or not from our server: nothing is decrypted
+  char pad[SIG_HEX_LEN + 1];
+  {
+    Hmac h;
+    h.begin(old_secret);
+    h.update("coldchain-rotate-pad|");
+    h.update(nonce);
+    h.finishHex(pad);
+  }
+  static const char HEX[] = "0123456789abcdef";
+  for (size_t i = 0; i < SIG_HEX_LEN; i += 2) {
+    const int c = (hexNibble(ct_hex[i]) << 4) | hexNibble(ct_hex[i + 1]);
+    const int k = (hexNibble(pad[i]) << 4) | hexNibble(pad[i + 1]);
+    const int b = c ^ k;
+    out_secret[i] = HEX[b >> 4];
+    out_secret[i + 1] = HEX[b & 15];
+  }
+  out_secret[SIG_HEX_LEN] = '\0';
+  return true;
+}
+
+}  // namespace crypto

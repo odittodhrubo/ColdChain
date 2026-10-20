@@ -1,6 +1,6 @@
 // Demo state (P20), run by `make demo` / `python -m coldchain_tools.stack demo`: a fresh database with the
-// users, both fridges and eight batches in varied states (Safe, one at ~25 % of its heat budget, one At risk at
-// ~12 %, one Discard, which latches its fridge). Prints JSON (credentials, batches, QR URLs) on stdout.
+// users, both fridges and ten batches, five per fridge, in varied states (Safe, one at ~25 % of its heat
+// budget, one At risk at ~12 %, one Discard, which latches its fridge). Prints JSON (credentials, batches, QR URLs) on stdout.
 //
 //   npx tsx src/scripts/demo-seed.ts --reset
 import fs from 'node:fs';
@@ -18,9 +18,11 @@ const BATCHES = [
   { fridge: 'fridge-01', name: 'Measles-Rubella', maker: 'Serum Institute', lot: 'MR-2291', left: 72, crit: 3, expiry: '2027-08-15' },
   { fridge: 'fridge-01', name: 'Rotavirus', maker: 'Bharat Biotech', lot: 'RV-7310', left: 25, crit: 2, expiry: '2027-01-20' },
   { fridge: 'fridge-01', name: 'Hepatitis B', maker: 'GSK', lot: 'HB-0419', left: 12, crit: 2, expiry: '2027-06-30' },
+  { fridge: 'fridge-01', name: 'Pneumococcal PCV13', maker: 'Pfizer', lot: 'PC-6620', left: 88, crit: 2, expiry: '2027-09-30' },
   { fridge: 'fridge-02', name: 'Polio bOPV', maker: 'Sanofi', lot: 'PV-1180', left: 100, crit: 3, expiry: '2028-02-28' },
   { fridge: 'fridge-02', name: 'Pentavalent', maker: 'Serum Institute', lot: 'PT-5502', left: 91, crit: 2, expiry: '2027-11-30' },
   { fridge: 'fridge-02', name: 'BCG', maker: 'Japan BCG Lab', lot: 'BC-3307', left: 55, crit: 1, expiry: '2027-05-31' },
+  { fridge: 'fridge-02', name: 'Insulin glargine', maker: 'Sanofi', lot: 'IG-2040', left: 64, crit: 3, expiry: '2027-04-30' },
   { fridge: 'fridge-02', name: 'Rabies', maker: 'Sanofi', lot: 'RB-3301', left: 0, crit: 2, expiry: '2026-12-31' },
 ]; // prettier-ignore
 
@@ -52,6 +54,10 @@ async function main() {
     db.prepare('UPDATE batches SET exposure_ms = ? WHERE id = ?').run(used, made.id); // exposure only ever grows
     refreshStatus(ctx, made.id, now);
     const v = getBatch(db, made.id, now);
+    // As HeatEngine.afterExposure does live: out of budget latches the fridge. The node, once connected and still
+    // reporting latch=0, then gets SET_LATCH (checkDeviceLatch) and turns its red LED on.
+    if (v.status === 'DISCARD' && v.remaining_pct <= 0)
+      db.prepare('UPDATE fridges SET latch_state = 1 WHERE id = ?').run(b.fridge);
     return {
       name: v.name,
       fridge: b.fridge,

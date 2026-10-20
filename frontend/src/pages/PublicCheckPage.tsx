@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { CircleCheck, CircleX, SearchX, TriangleAlert } from 'lucide-react';
 import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
+import { useT } from '../i18n';
+import { LanguageToggle } from '../i18n/LanguageToggle';
 import { Logo } from '../layout/Logo';
 import { api, ApiError } from '../lib/api';
 import { VvmMark } from '../ui/VvmMark';
@@ -15,30 +17,12 @@ interface PublicBatch {
   last_checked: string;
 }
 
-// Plain guidance for whoever holds the vial: staff and the public read a colour very differently.
+// Colour and icon per verdict; the word and guidance come from the translation table (staff and the public read
+// a colour very differently, and the vial may be held by a Bengali-speaking patient).
 const VERDICT = {
-  SAFE: {
-    word: 'SAFE',
-    icon: CircleCheck,
-    ink: 'var(--safe)',
-    wash: 'var(--safe-wash)',
-    guidance: 'Safe to use. This batch stayed within its storage limits.',
-  },
-  AT_RISK: {
-    word: 'AT RISK',
-    icon: TriangleAlert,
-    ink: 'var(--atrisk)',
-    wash: 'var(--atrisk-wash)',
-    guidance:
-      'Use only on a pharmacist’s instruction. This batch was warm for a while; ask staff to verify it first.',
-  },
-  DISCARD: {
-    word: 'DISCARD',
-    icon: CircleX,
-    ink: 'var(--discard)',
-    wash: 'var(--discard-wash)',
-    guidance: 'Do not use. Report this vial to the pharmacist.',
-  },
+  SAFE: { icon: CircleCheck, ink: 'var(--safe)', wash: 'var(--safe-wash)' },
+  AT_RISK: { icon: TriangleAlert, ink: 'var(--atrisk)', wash: 'var(--atrisk-wash)' },
+  DISCARD: { icon: CircleX, ink: 'var(--discard)', wash: 'var(--discard-wash)' },
 } as const;
 
 /** Keep this page out of search engines while it is open. */
@@ -63,6 +47,7 @@ function useNoIndex() {
  */
 export function PublicCheckPage() {
   useNoIndex();
+  const { t } = useT();
   const { token = '' } = useParams();
   const { data, error, isPending } = useQuery({
     queryKey: ['public-batch', token],
@@ -75,47 +60,42 @@ export function PublicCheckPage() {
   return (
     <main className="flex min-h-dvh flex-col items-center bg-ground px-4 py-6">
       <div className="w-full max-w-sm">
-        <div className="mb-5 flex justify-center">
+        <div className="mb-5 flex items-center justify-between">
           <Logo />
+          <LanguageToggle />
         </div>
         {isPending ? (
           <div
             className="h-96 animate-pulse rounded-[var(--radius-label)] bg-panel"
-            aria-label="Checking the batch"
+            aria-label={t('pub.checking')}
           />
         ) : err?.status === 404 || (!data && !err) ? (
           <section className="rounded-[var(--radius-label)] border border-rule bg-panel p-6 text-center">
             <SearchX aria-hidden className="mx-auto size-10 text-ink-3" />
-            <h1 className="mt-3 text-xl font-bold text-ink">Batch not found</h1>
-            <p className="mt-2 text-sm text-ink-2">
-              This code doesn’t match any batch. Check that you scanned the whole label, or ask the
-              pharmacist.
-            </p>
+            <h1 className="mt-3 text-xl font-bold text-ink">{t('pub.notFound.title')}</h1>
+            <p className="mt-2 text-sm text-ink-2">{t('pub.notFound.help')}</p>
           </section>
         ) : err ? (
           <section
             role="alert"
             className="rounded-[var(--radius-label)] border border-rule bg-panel p-6 text-center"
           >
-            <h1 className="text-xl font-bold text-ink">Can’t check right now</h1>
+            <h1 className="text-xl font-bold text-ink">{t('pub.error.title')}</h1>
             <p className="mt-2 text-sm text-ink-2">
-              {err.status === 429
-                ? 'Too many checks from this connection. Wait a minute and try again.'
-                : 'The service did not answer. Try again in a moment.'}
+              {err.status === 429 ? t('pub.error.rate') : t('pub.error.generic')}
             </p>
           </section>
         ) : (
           <Verdict batch={data!} />
         )}
-        <p className="mt-5 text-center text-xs text-ink-3">
-          ColdChain batch check · vaccines must stay between 2 and 8 °C
-        </p>
+        <p className="mt-5 text-center text-xs text-ink-3">{t('pub.footer')}</p>
       </div>
     </main>
   );
 }
 
 function Verdict({ batch }: { batch: PublicBatch }) {
+  const { t } = useT();
   const v = VERDICT[batch.status];
   const Icon = v.icon;
   const checked = new Date(batch.last_checked);
@@ -135,31 +115,31 @@ function Verdict({ batch }: { batch: PublicBatch }) {
           className="text-[2.6rem] leading-none font-extrabold tracking-[-0.02em]"
           style={{ color: v.ink }}
         >
-          {v.word}
+          {t(`verdict.${batch.status}.word`)}
         </h1>
-        <p className="mt-1 text-base font-semibold text-ink">{v.guidance}</p>
+        <p className="mt-1 text-base font-semibold text-ink">{t(`verdict.${batch.status}.guidance`)}</p>
       </div>
       <dl className="figures divide-y divide-rule px-6 text-sm">
         <div className="flex justify-between gap-4 py-3">
-          <dt className="text-ink-2">Vaccine</dt>
+          <dt className="text-ink-2">{t('pub.vaccine')}</dt>
           <dd className="text-right font-semibold text-ink">{batch.name}</dd>
         </div>
         <div className="flex justify-between gap-4 py-3">
-          <dt className="text-ink-2">Lot</dt>
+          <dt className="text-ink-2">{t('pub.lot')}</dt>
           <dd className="text-right font-semibold text-ink">{batch.lot_number}</dd>
         </div>
         <div className="flex justify-between gap-4 py-3">
-          <dt className="text-ink-2">Expiry date</dt>
+          <dt className="text-ink-2">{t('pub.expiry')}</dt>
           <dd
             className="text-right font-semibold"
             style={{ color: batch.expired ? 'var(--breach)' : 'var(--ink)' }}
           >
             {batch.expiry_date}
-            {batch.expired && <span className="ml-2 font-bold">Expired</span>}
+            {batch.expired && <span className="ml-2 font-bold">{t('pub.expired')}</span>}
           </dd>
         </div>
         <div className="flex justify-between gap-4 py-3">
-          <dt className="text-ink-2">Last checked</dt>
+          <dt className="text-ink-2">{t('pub.lastChecked')}</dt>
           <dd className="text-right text-ink">
             {checked.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
           </dd>
@@ -167,7 +147,7 @@ function Verdict({ batch }: { batch: PublicBatch }) {
       </dl>
       <div className="flex items-center justify-center gap-2 border-t border-rule px-6 py-3 text-xs text-ink-3">
         <VvmMark status={batch.status} size={16} />
-        Heat budget read like a vial monitor label
+        {t('pub.vvmNote')}
       </div>
     </section>
   );

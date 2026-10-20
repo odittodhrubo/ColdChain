@@ -16,6 +16,9 @@ const readingFields = {
   seq,
   ts,
   temp: z.number().min(-100).max(150).nullable(), // null = sensor fault
+  // A3: optional room temperature from a second DS18B20 outside the fridge. Absent on nodes without one
+  // (Wokwi, and any single-sensor node), so it never changes existing message signatures.
+  ambient: z.number().min(-100).max(150).nullable().optional(),
   door: bit,
   comp: bit,
   power: z.enum(['MAINS', 'BATTERY']),

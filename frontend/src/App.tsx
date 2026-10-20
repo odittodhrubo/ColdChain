@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import { AuthProvider } from './auth/AuthProvider';
 import { RequireAuth, RequirePermission } from './auth/guards';
 import { AppShell } from './layout/AppShell';
@@ -8,6 +8,7 @@ import { shouldRetry } from './lib/api';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NoPermissionPage';
 import { PublicCheckPage } from './pages/PublicCheckPage';
+import { LanguageProvider } from './i18n';
 import { RealtimeProvider, type Connect } from './realtime/RealtimeProvider';
 import { ThemeProvider } from './theme/ThemeProvider';
 import { Skeleton } from './ui/States';
@@ -34,6 +35,9 @@ const AuditPage = lazyPage(() => import('./pages/AuditPage'), 'AuditPage');
 const UsersPage = lazyPage(() => import('./pages/UsersPage'), 'UsersPage');
 const RelocationsPage = lazyPage(() => import('./ai/Relocations'), 'RelocationsPage');
 const AiReportPage = lazyPage(() => import('./ai/AiReportPage'), 'AiReportPage');
+const AccountPage = lazyPage(() => import('./pages/AccountPage'), 'AccountPage');
+const AccountGatePage = lazyPage(() => import('./pages/AccountGatePage'), 'AccountGatePage');
+const DisplayPage = lazyPage(() => import('./pages/DisplayPage'), 'DisplayPage');
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -49,13 +53,15 @@ export function Providers({ children, connect }: { children: ReactNode; connect?
   const [client] = useState(makeQueryClient);
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <QueryClientProvider client={client}>
-          <AuthProvider>
-            <RealtimeProvider connect={connect}>{children}</RealtimeProvider>
-          </AuthProvider>
-        </QueryClientProvider>
-      </ToastProvider>
+      <LanguageProvider>
+        <ToastProvider>
+          <QueryClientProvider client={client}>
+            <AuthProvider>
+              <RealtimeProvider connect={connect}>{children}</RealtimeProvider>
+            </AuthProvider>
+          </QueryClientProvider>
+        </ToastProvider>
+      </LanguageProvider>
     </ThemeProvider>
   );
 }
@@ -65,6 +71,8 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/check/:token" element={<PublicCheckPage />} />
+      <Route path="/display" element={<DisplayPage />} />
+      <Route path="/account/required" element={<AccountGatePage />} />
       <Route
         element={
           <RequireAuth>
@@ -79,6 +87,7 @@ export function AppRoutes() {
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="relocations" element={<RelocationsPage />} />
         <Route path="ai-report" element={<AiReportPage />} />
+        <Route path="account" element={<AccountPage />} />
         <Route
           path="security"
           element={

@@ -118,3 +118,99 @@ def test_seq_file_never_reuses(tmp_path):
     first = f.start()
     f.save(first + 7)  # crashed after saving at +7 but sending up to +19
     assert f.start() >= first + 7 + 20
+
+
+def test_sync_request_replays_a_gap_the_backend_missed_while_down():
+    """R1: published live while the backend was down (the broker dropped it); the backend finds the gap and
+    asks for that range; the node resends it from its replay window, in order, and nothing outside it."""
+    node, tr, up = setup()
+    t = run(node, up, 60)
+    sent = [b["seq"] for b in tr.bodies("telemetry")] + [b["seq"] for b in tr.bodies("event")]
+    assert len(up.recent) == len(sent) and len(up.buffer) == 0  # delivered live, still replayable
+    gap = sorted(sent)[3:7]  # the backend was down for these
+    cmd = {"cmd_id": "c1", "type": "SYNC_REQUEST", "args": {"from_seq": gap[0], "to_seq": gap[-1]}}
+    tr.sent.clear()
+    up.handle(topic(PREFIX, "fridge-07", "cmd"), server_msg("cmd", cmd))
+    assert "4 replayed" in tr.bodies("cmdack")[0]["detail"]
+    run(node, up, 1, t)
+    chunk = tr.bodies("sync")[-1]
+    assert [r["seq"] for r in chunk["readings"]] == gap
+    assert (chunk["from_seq"], chunk["to_seq"]) == (gap[0], gap[-1])
+    up.handle(topic(PREFIX, "fridge-07", "ack"), server_msg("ack", {"seq_upto": gap[-1]}))
+    kept = {e["seq"] for e in up.recent.items}
+    assert len(up.buffer) == 0 and not kept & set(gap) and set(sent) - set(gap) <= kept
+
+
+def test_ack_never_frees_an_entry_replayed_after_its_chunk_went_out():
+    from coldchain_tools.sim_engine import RingBuffer, Syncer
+
+    recent, buf = RingBuffer(), RingBuffer()
+    sync = Syncer(buf)
+    for s in range(150, 161):
+        recent.push({"seq": s})
+    for s in range(200, 220):
+        buf.push({"seq": s})
+    assert sync.due(0, True)
+    sync.sent(0)  # chunk 200..219 in flight
+    assert recent.move_range_to(buf, 150, 160) == 11
+    assert sync.on_ack(219)
+    assert [e["seq"] for e in buf.items] == list(range(150, 161))
+    assert buf.insert_sorted({"seq": 155}) and len(buf) == 11  # duplicate: no-op
+
+
+def test_rotate_secret_switches_keys_and_acks_with_the_new_one():
+    """S7: the cmdack is signed with the new key (the server's proof); the old key is refused afterwards."""
+    from coldchain_tools.envelope import rotate_seal
+
+    node, tr, up = setup()
+    new = "b" * 63 + "1"
+    nonce = "0123456789abcdef0123456789abcdef"
+    ct, tag = rotate_seal(SECRET, new, nonce)
+    cmd = {"cmd_id": "r1", "type": "ROTATE_SECRET", "args": {"nonce": nonce, "ct": ct, "tag": tag}}
+    up.handle(topic(PREFIX, "fridge-07", "cmd"), server_msg("cmd", cmd))
+    acks = [(t, p) for t, p in tr.sent if t.endswith("/cmdack")]
+    reason, env = envelope.verify(acks[-1][1], {"fridge-07": new})
+    assert reason == "OK" and json.loads(env["body"])["ok"] is True
+    assert envelope.verify(acks[-1][1], {"fridge-07": SECRET})[0] == "BAD_SIG"
+    # a command still signed with the old secret is refused now
+    up.handle(topic(PREFIX, "fridge-07", "cmd"), server_msg("cmd", {"cmd_id": "c2", "type": "BUZZER_TEST"}))
+    assert up.rejected.get("BAD_SIG") == 1
+    # a seal that does not verify leaves the key alone
+    up.handle(
+        topic(PREFIX, "fridge-07", "cmd"),
+        server_msg(
+            "cmd",
+            {"cmd_id": "r2", "type": "ROTATE_SECRET", "args": {"nonce": nonce, "ct": ct, "tag": "0" * 64}},
+            secret=new,
+        ),
+    )
+    assert up.secret == new and up.rejected.get("BAD_ROTATION") == 1
+
+
+def test_runner_applies_web_manual_controls_from_the_sim_topic(monkeypatch):
+    """The web app's POST /api/fridges/:id/sim lands on <prefix>/<device_id>/sim and the node applies it."""
+    import queue
+
+    from coldchain_tools import virtual_node
+
+    class Transport(FakeTransport):
+        def __init__(self, *args):  # same positional signature; the last is the subscribe list
+            super().__init__()
+            self.subscribe = args[-1]
+            self.inbox: queue.Queue[tuple[str, str]] = queue.Queue()
+            self.outages: list[bool] = []
+
+        def set_outage(self, on):
+            self.outages.append(on)
+
+    monkeypatch.setattr(virtual_node, "MqttTransport", Transport)
+    runner = virtual_node.NodeRunner("fridge-07", SECRET, "mqtt://x", "", "", PREFIX, boot_lock=False)
+    sim = f"{PREFIX}/fridge-07/sim"
+    assert sim in runner.transport.subscribe
+    msgs = ({"action": "door", "arg": True}, {"action": "hold", "arg": 11.5}, {"action": "wifi", "arg": True})
+    for msg in msgs:
+        runner.transport.inbox.put((sim, json.dumps(msg)))
+    runner.transport.inbox.put((sim, "not json"))  # ignored, the loop keeps going
+    runner.step()
+    assert runner.node.door_open and runner.node.hold == 11.5
+    assert runner.uplink.outage and runner.transport.outages == [True]

@@ -42,11 +42,19 @@ The model keeps running in manual mode, so switching back continues from a physi
 ## Compressor control
 
 - ON when `T ≥ 7.0 °C`, OFF when `T ≤ 3.0 °C`.
-- Never ON until 60 s after the last OFF. At boot the timer counts as already satisfied.
+- Never ON until 60 s after the last OFF. **A reboot counts as an OFF** (`bootLock()` in `setup()`): the relay de-energises on any reset, so after a watchdog reset or brownout mid-cycle the compressor still waits 60 s and cannot short-cycle. (`CompressorControl` without `bootLock()`, as in the native tests and the ML data generator, counts the timer as already satisfied at start.)
 - `force_off` (on battery or DEAD, see Power failure) keeps the compressor OFF and re-arms the timer on every call, so the 60 s counts from when power returns.
 - The relay (GPIO16, polarity `RELAY_ACTIVE_HIGH`) and the blue LED are always written together. The relay is driven OFF first thing in `setup()`, so it is never in an undefined state.
 
 With a 60 s minimum off-time the temperature can overshoot above 7 °C while the compressor waits. That is correct behaviour.
+
+## Task watchdog
+
+The control loop runs under the ESP32 task watchdog: `esp_task_wdt_init(WDT_TIMEOUT_S = 8, panic)` plus `enableLoopWDT()`, armed at the end of `setup()`. The Arduino core resets it after every `loop()` pass. If the loop ever stops (a stuck I²C bus, a library bug), the chip resets within 8 s. It comes back with the relay OFF, the 60 s boot lock above, its latch and `exp_s` from NVS, and a `BOOT` event whose `data.reset` names the cause (`TASK_WDT`, `PANIC`, `BROWNOUT`, `POWERON`, …). The backend writes watchdog, panic and brownout boots into the audit chain.
+
+The network task (core 0) is deliberately not watched. A TLS handshake can block it for a long time, and a reset would drop the RAM buffer. The control loop never waits on it.
+
+To test it, build with `-DDEBUG_UNSIGNED_CMDS` and type `debug hang`: the loop stops, and the next boot reports `[boot] reset reason TASK_WDT`.
 
 ## Sensor fault (fail-safe)
 
@@ -88,6 +96,7 @@ Exactly one of green / yellow / red is lit: green = SAFE, yellow = WARNING, red 
 | `door auto` | follow the switch again |
 | `help` | list commands |
 | `cmd reset_latch` / `set_latch` / `buzzer_test` / `sync_request` | **debug builds only** (`-DDEBUG_UNSIGNED_CMDS`, off by default): run a command without a signature |
+| `debug hang` | **debug builds only**: stop the loop to test the task watchdog (reset within 8 s) |
 
 Every 5 s the node prints one line, for example:
 
@@ -130,7 +139,7 @@ Anything else is dropped and counted (`rejected_cmds` in `status`) with its reas
 | `RESET_LATCH` | clear the latch, zero `exp_s`, persist, `LATCH_RESET` |
 | `SET_LATCH` | latch exactly as if the budget ran out (red solid, beep, `LATCH_SET` with `reason:"command"`, persisted) |
 | `BUZZER_TEST` | beep for 1 s |
-| `SYNC_REQUEST` | restart the offline sync from the oldest unacked buffered entry; the cmdack says from which seq, or `nothing buffered` |
+| `SYNC_REQUEST` | move the live-sent entries in `args.from_seq..to_seq` (all of them without a range) from the replay window into the offline buffer, then restart the sync from the oldest unacked entry; the cmdack says from which seq, how many were replayed, or `nothing buffered` |
 
 `-DDEBUG_UNSIGNED_CMDS` adds the console `cmd …` shortcut, which bypasses signatures. It is off by default and must never ship.
 
@@ -151,6 +160,11 @@ The **WI-FI OUTAGE** button (GPIO33) toggles a simulated outage: Wi-Fi disconnec
 - **Buffer:** while the uplink is down, or when a publish fails, every reading and event goes into a ring buffer of `BUFFER_CAPACITY = 720` entries (60 min at 5 s; the requirement is ≥ 30 min = 360). Each entry is 16 bytes of binary (seq, ts, temp × 100, exp_s, batt, state or event type, flags), ~11.5 kB in total, and is serialised to JSON only when sent. When full, the oldest entry is overwritten and counted; the next live telemetry reports `"dropped":N`. Readings created before the clock was ever valid have no timestamp and are dropped (counted as `no clock`); once NTP has synced, the clock keeps running through outages.
 - **Sync on reconnect:** stop-and-wait, oldest first. The node sends one `sync` chunk of at most 25 items (`from_seq` / `to_seq`, fresh `ts` and `nonce`), then waits for the server's signed ack `{"seq_upto":N}`. The ack is verified like a command (window, HMAC, nonce). Then entries ≤ N are freed and the next chunk goes. With no ack within 5 s the same chunk is resent; after 5 retries the sender backs off for 60 s. **Entries are never freed before an ack.** A late duplicate ack (below the oldest buffered seq) is ignored. Events buffered offline travel in the same array as event bodies (contract §5).
 - **Live telemetry continues during sync** with higher seqs; the server orders by seq, so nothing overtakes the buffered data.
+- **Retain until acknowledged (R1).** A successful live publish only means the message reached the socket. If the backend was down, the broker dropped it (QoS 0, PubSubClient has no QoS 1 publish). So every live-sent reading and event is also kept in a second ring, `recent` (720 entries, the last 60 min, another 11.5 kB of RAM).
+  - The server finds the hole in the seq numbers and sends `SYNC_REQUEST {from_seq, to_seq}`.
+  - The node moves exactly those entries into the offline buffer, in seq order, and they sync like any buffered data.
+  - An ack frees only entries that went out in a sync chunk (`bufflag::SENT`). An older entry replayed in while a chunk was in flight survives that chunk's ack.
+  - The offline buffer, its `buf:N` and `dropped` counters are unchanged: `recent` is not counted in them.
 - `SYNC_REQUEST` restarts the sync from the oldest unacked entry.
 - Exactly-once is at-least-once delivery from the node plus dedupe on `(device_id, seq)` at the server.
 
@@ -194,7 +208,7 @@ Wi-Fi and MQTT reconnect with exponential backoff, 1 s doubling to 30 s; Wi-Fi a
 ### Messages
 
 - **Telemetry** every `TELEMETRY_PERIOD_S` (5 s), plus immediately with `reason:"door"` and a `DOOR_OPEN` / `DOOR_CLOSE` event on every door change, including a console override. Bodies follow contract §5 exactly. `temp` has two decimals and is `null` on a sensor fault; `exp_s` and `latch` come from the heat budget.
-- **Events:** `BOOT` is created as soon as the clock is valid (sent, or buffered if the broker is not reachable yet). `WIFI_LOST` / `WIFI_BACK` follow the uplink going down and coming back (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
+- **Events:** `BOOT` (`{"fw":"1.0.0","reset":"<reason>"}`) is created as soon as the clock is valid (sent, or buffered if the broker is not reachable yet). `WIFI_LOST` / `WIFI_BACK` follow the uplink going down and coming back (not the first connect). `COMP_ON`, `COMP_OFF`, `DOOR_*` and `SENSOR_FAULT` go out when they happen.
 - **Envelope** exactly as contract §4: the body is serialised once, signed, then embedded as a JSON string and never re-serialised. `nonce` is 16 hex chars from two `esp_random()` words. `ts` is the send time.
 - `seq` is one counter for telemetry and events. It is written to NVS every 20 increments, and on boot the stored value jumps by 20, so a crash can never make the node reuse a seq.
 

@@ -5,6 +5,7 @@ import {
   DoorClosed,
   DoorOpen,
   Fan,
+  List,
   Lock,
   Plug,
   Power,
@@ -14,8 +15,19 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Download, Printer, SlidersHorizontal } from 'lucide-react';
+import { useMemo, useState, type FormEvent } from 'react';
+import { Link, useParams } from 'react-router';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../auth/AuthProvider';
+import { can } from '../auth/permissions';
+import { api, ApiError } from '../lib/api';
+import type { Fridge } from '../lib/types';
+import { Button } from '../ui/Button';
+import { Field } from '../ui/Field';
+import { Modal } from '../ui/Modal';
+import { Select } from '../ui/Select';
+import { useToast } from '../ui/Toast';
 import {
   Area,
   CartesianGrid,
@@ -34,14 +46,17 @@ import { RISK, STALE_AFTER_MS } from '../ai/Forecast';
 import { usePrediction } from '../ai/queries';
 import { BudgetPanel } from '../dashboard/BudgetPanel';
 import { FridgeCard } from '../dashboard/FridgeCard';
+import { SimControls } from '../dashboard/SimControls';
+import { fmt, useT, type StringKey } from '../i18n';
 import { PageHeader } from '../layout/AppShell';
-import { DOUBLE_ABOVE_C, SAFE_MAX_C, SAFE_MIN_C } from '../lib/constants';
+import { CALIBRATION_MAX_C, DOUBLE_ABOVE_C, SAFE_MAX_C, SAFE_MIN_C } from '../lib/constants';
 import { useFridge, useReadings, type HistoryPoint } from '../lib/queries';
 import { serverNow, useServerNow } from '../lib/time';
 import type { DeviceEvent, Prediction, ReadingRow } from '../lib/types';
 import { Panel } from '../ui/Panel';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
-import { Table } from '../ui/Table';
+import { Pager, usePaged } from '../ui/Pager';
+import { Table, type Column } from '../ui/Table';
 
 const RANGES = [
   { key: '15m', label: '15 min', s: 15 * 60, bucket: 5 },
@@ -128,14 +143,19 @@ export function forecastPoints(points: HistoryPoint[], p: Prediction | null | un
 }
 
 function ChartTooltip({ active, payload }: { active?: boolean; payload?: { payload: ChartPoint }[] }) {
+  const { t } = useT();
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   if (p.forecast && p.band)
     return (
       <div className="figures rounded-md border border-rule bg-panel px-3 py-2 text-xs shadow-[0_8px_24px_rgb(15_27_42/0.14)]">
-        <p className="font-semibold text-ink">Forecast {time(p.ts, true)}</p>
+        <p className="font-semibold text-ink">{fmt(t('fd.tipForecast'), { t: time(p.ts, true) })}</p>
         <p className="text-ink-2">
-          {p.fc?.toFixed(1)} °C (80 % range {p.band[0].toFixed(1)}–{p.band[1].toFixed(1)})
+          {fmt(t('fd.tipBand'), {
+            v: p.fc?.toFixed(1) ?? '?',
+            a: p.band[0].toFixed(1),
+            b: p.band[1].toFixed(1),
+          })}
         </p>
       </div>
     );
@@ -143,21 +163,23 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: { paylo
     <div className="figures rounded-md border border-rule bg-panel px-3 py-2 text-xs shadow-[0_8px_24px_rgb(15_27_42/0.14)]">
       <p className="font-semibold text-ink">{time(p.ts, true)}</p>
       <p className="text-ink-2">
-        {p.temp === null ? 'no reading' : `${p.temp.toFixed(2)} °C`}
+        {p.temp === null ? t('fd.tipNoReading') : `${p.temp.toFixed(2)} °C`}
         {p.min !== null && p.max !== null && p.min !== p.max && ` (${p.min.toFixed(1)}–${p.max.toFixed(1)})`}
       </p>
       <p className="text-ink-3">
-        {p.comp ? 'compressor on' : 'compressor off'}
-        {p.door ? ' · door opened' : ''}
-        {p.battery ? ' · on battery' : ''}
-        {p.late ? ' · synced late' : ''}
-        {p.seeded ? ' · seeded demo history' : ''}
+        {p.comp ? t('fd.tipCompOn') : t('fd.tipCompOff')}
+        {p.door ? t('fd.tipDoor') : ''}
+        {p.battery ? t('fd.tipBattery') : ''}
+        {p.late ? t('fd.tipLate') : ''}
+        {p.seeded ? t('fd.tipSeeded') : ''}
       </p>
     </div>
   );
 }
 
 function HistoryChart({ fridgeId }: { fridgeId: string }) {
+  const { t } = useT();
+  const rangeLabel = (key: string) => t(`fd.range${key}` as StringKey);
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[1]);
   const { data, isPending, error, refetch } = useReadings(
     fridgeId,
@@ -189,9 +211,13 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
 
   return (
     <Panel
-      title="Temperature history"
+      title={t('fd.tempHistory')}
       actions={
-        <div role="radiogroup" aria-label="Range" className="flex rounded-md border border-rule p-0.5">
+        <div
+          role="radiogroup"
+          aria-label={t('fd.rangeLabel')}
+          className="flex rounded-md border border-rule p-0.5"
+        >
           {RANGES.map((r) => (
             <button
               key={r.key}
@@ -203,7 +229,7 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
                 r.key === range.key ? 'bg-teal text-on-teal' : 'text-ink-2 hover:bg-panel-2'
               }`}
             >
-              {r.label}
+              {rangeLabel(r.key)}
             </button>
           ))}
         </div>
@@ -214,17 +240,17 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
       ) : error ? (
         <ErrorState error={error} onRetry={() => void refetch()} />
       ) : points.length === 0 ? (
-        <EmptyState title="No readings in this range">
-          Pick a longer range, or check that the node is online.
-        </EmptyState>
+        <EmptyState title={t('fd.noRange')}>{t('fd.noRangeBody')}</EmptyState>
       ) : (
         <>
           <div
             className="h-72"
             role="img"
-            aria-label={`Temperature over the last ${range.label}, ${points.length} points${
-              fc.length ? `, forecast ${prediction!.pred_temp_30!.toFixed(1)} °C in 30 minutes` : ''
-            }`}
+            aria-label={fmt(t('fd.chartAria'), {
+              range: rangeLabel(range.key),
+              n: points.length,
+              fc: fc.length ? fmt(t('fd.chartAriaFc'), { v: prediction!.pred_temp_30!.toFixed(1) }) : '',
+            })}
           >
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chartData} margin={{ top: 10, right: 12, bottom: 0, left: -12 }}>
@@ -266,7 +292,7 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
                     stroke="none"
                     ifOverflow="hidden"
                     label={{
-                      value: 'seeded demo history',
+                      value: t('fd.seededDemo'),
                       position: 'insideBottomLeft',
                       fill: 'var(--ink-3)',
                       fontSize: 11,
@@ -355,40 +381,40 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
                 className="h-2.5 w-4 rounded-sm"
                 style={{ background: 'color-mix(in oklab, var(--safe) 25%, transparent)' }}
               />
-              Safe band 2–8 °C
+              {t('fd.legendSafe')}
             </li>
             <li className="flex items-center gap-1.5">
               <span
                 className="h-2.5 w-4 rounded-sm"
                 style={{ background: 'color-mix(in oklab, var(--teal) 18%, transparent)' }}
               />
-              Compressor running
+              {t('fd.legendComp')}
             </li>
             <li className="flex items-center gap-1.5">
               <span className="h-3 w-0 border-l-2 border-dashed border-warning" />
-              Door opened
+              {t('fd.legendDoor')}
             </li>
             <li className="flex items-center gap-1.5">
               <span className="h-3 w-0 border-l-2 border-dashed border-offline" />
-              Power failure
+              {t('fd.legendPower')}
             </li>
             <li className="flex items-center gap-1.5">
               <span className="size-2 rotate-45 bg-warning" />
-              Arrived late through sync
+              {t('fd.legendLate')}
             </li>
             {seededUntil !== undefined && (
               <li className="flex items-center gap-1.5">
                 <span className="h-2.5 w-4 rounded-sm bg-ink-3/20" />
-                Seeded demo history (not from a device)
+                {t('fd.legendSeeded')}
               </li>
             )}
             {fc.length > 0 && (
               <li className="flex items-center gap-1.5">
                 <span className="h-0 w-4 border-t-2 border-dashed" style={{ borderColor: risk!.ink }} />
-                Forecast +30 min, shaded 80 % range
+                {t('fd.legendForecast')}
               </li>
             )}
-            <li className="text-ink-3">{data!.bucket} s per point</li>
+            <li className="text-ink-3">{fmt(t('fd.perPoint'), { n: data!.bucket })}</li>
           </ul>
         </>
       )}
@@ -397,14 +423,13 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
 }
 
 function Timeline({ events }: { events: DeviceEvent[] }) {
-  if (events.length === 0)
-    return (
-      <EmptyState title="No events yet">Door, power, alarm, latch and sync events appear here.</EmptyState>
-    );
+  const { t } = useT();
+  if (events.length === 0) return <EmptyState title={t('fd.noEvents')}>{t('fd.noEventsBody')}</EmptyState>;
   return (
     <ol className="flex flex-col">
       {events.map((e) => {
         const m = EVENT[e.type] ?? { icon: Power, label: e.type };
+        const label = EVENT[e.type] ? t(`fd.ev.${e.type}` as StringKey) : e.type;
         const Icon = m.icon;
         return (
           <li
@@ -413,7 +438,7 @@ function Timeline({ events }: { events: DeviceEvent[] }) {
           >
             <Icon aria-hidden className="mt-0.5 size-4 shrink-0" style={{ color: m.ink ?? 'var(--ink-3)' }} />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-ink">{m.label}</p>
+              <p className="text-sm font-medium text-ink">{label}</p>
               <p className="figures text-xs text-ink-3">
                 {time(e.ts, true)} · seq {e.seq}
               </p>
@@ -421,7 +446,7 @@ function Timeline({ events }: { events: DeviceEvent[] }) {
             {e.late === 1 && (
               <span className="inline-flex items-center gap-1 rounded-full bg-warning-wash px-2 py-0.5 text-xs font-semibold text-warning">
                 <CloudUpload aria-hidden className="size-3" />
-                synced
+                {t('fd.syncedBadge')}
               </span>
             )}
           </li>
@@ -431,15 +456,318 @@ function Timeline({ events }: { events: DeviceEvent[] }) {
   );
 }
 
+const EXPORT_RANGES = [
+  { label: 'Last 7 days', days: 7 },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+] as const;
+
+/** P2: export a temperature record. CSV downloads; the print-ready HTML opens in a tab to save as PDF. */
+function ExportDialog({ fridge, onClose }: { fridge: Fridge; onClose: () => void }) {
+  const { t } = useT();
+  const EXPORT_LABEL: Record<number, StringKey> = { 7: 'fd.last7', 30: 'fd.last30', 90: 'fd.last90' };
+  const [days, setDays] = useState(7);
+  const go = (format: 'csv' | 'html') => {
+    const to = Math.floor(Date.now() / 1000);
+    const from = to - days * 86_400;
+    const url = `/api/fridges/${encodeURIComponent(fridge.id)}/report?from=${from}&to=${to}&format=${format}`;
+    window.open(url, '_blank', 'noopener'); // GET with the same-origin session cookie; honours Content-Disposition
+    onClose();
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('fd.exportTitle')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {t('fd.cancel')}
+          </Button>
+          <Button
+            variant="secondary"
+            icon={<Printer aria-hidden className="size-4" />}
+            onClick={() => go('html')}
+          >
+            {t('fd.printPdf')}
+          </Button>
+          <Button icon={<Download aria-hidden className="size-4" />} onClick={() => go('csv')}>
+            {t('fd.downloadCsv')}
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-4">
+        <p className="text-sm text-ink-2">{t('fd.exportBody')}</p>
+        <Select label={t('fd.period')} value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+          {EXPORT_RANGES.map((r) => (
+            <option key={r.days} value={r.days}>
+              {t(EXPORT_LABEL[r.days])}
+            </option>
+          ))}
+        </Select>
+      </div>
+    </Modal>
+  );
+}
+
+/** P4: set the sensor calibration offset (Admin). Bounded to ±CALIBRATION_MAX_C; the device applies it. */
+function CalibrateDialog({ fridge, onClose }: { fridge: Fridge; onClose: () => void }) {
+  const { t } = useT();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [offset, setOffset] = useState(String(fridge.calibration_offset_c));
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const calibrate = useMutation({
+    mutationFn: () =>
+      api(`/api/devices/${encodeURIComponent(fridge.device_id!)}/calibrate`, {
+        method: 'POST',
+        body: { offset_c: Number(offset), reason: reason.trim() },
+      }),
+    onSuccess: () => {
+      toast({ tone: 'success', title: t('fd.calSent') });
+      void qc.invalidateQueries({ queryKey: ['fridge', fridge.id] });
+      onClose();
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('fd.calFail')),
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const n = Number(offset);
+    if (!Number.isFinite(n) || Math.abs(n) > CALIBRATION_MAX_C)
+      return setError(fmt(t('fd.offsetRangeErr'), { m: CALIBRATION_MAX_C }));
+    if (reason.trim().length < 3) return setError(t('fd.giveReason'));
+    setError(null);
+    calibrate.mutate();
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('fd.calibrateTitle')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={calibrate.isPending}>
+            {t('fd.cancel')}
+          </Button>
+          <Button type="submit" form="calibrate-form" loading={calibrate.isPending}>
+            {t('fd.sendToDevice')}
+          </Button>
+        </>
+      }
+    >
+      <form id="calibrate-form" onSubmit={submit} noValidate className="grid gap-4">
+        {error && (
+          <p
+            role="alert"
+            className="rounded-md border border-breach/40 bg-breach-wash px-3 py-2 text-sm font-medium text-breach"
+          >
+            {error}
+          </p>
+        )}
+        <p className="text-sm text-ink-2">{t('fd.calBody')}</p>
+        <Field
+          label={t('fd.offset')}
+          type="number"
+          inputMode="decimal"
+          step="0.1"
+          min={-CALIBRATION_MAX_C}
+          max={CALIBRATION_MAX_C}
+          value={offset}
+          onChange={(e) => setOffset(e.target.value)}
+          hint={fmt(t('fd.offsetHint'), {
+            m: CALIBRATION_MAX_C,
+            c: `${fridge.calibration_offset_c > 0 ? '+' : ''}${fridge.calibration_offset_c}`,
+          })}
+        />
+        <Field
+          label={t('fd.reason')}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={t('fd.reasonPlaceholder')}
+          autoComplete="off"
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function DetailActions({ fridge }: { fridge: Fridge }) {
+  const { t } = useT();
+  const { user } = useAuth();
+  const [dialog, setDialog] = useState<'export' | 'calibrate' | null>(null);
+  const mayCalibrate = can(user?.role, 'device:manage') && fridge.device_id;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="secondary"
+        className="min-h-9 px-2.5"
+        icon={<Download aria-hidden className="size-4" />}
+        onClick={() => setDialog('export')}
+      >
+        {t('fd.exportRecord')}
+      </Button>
+      {mayCalibrate && (
+        <Button
+          variant="secondary"
+          className="min-h-9 px-2.5"
+          icon={<SlidersHorizontal aria-hidden className="size-4" />}
+          onClick={() => setDialog('calibrate')}
+        >
+          {t('fd.calibrate')}
+        </Button>
+      )}
+      <Link to="/fridges" className="text-sm font-semibold text-teal-strong underline">
+        {t('fd.allFridges')}
+      </Link>
+      {dialog === 'export' && <ExportDialog fridge={fridge} onClose={() => setDialog(null)} />}
+      {dialog === 'calibrate' && <CalibrateDialog fridge={fridge} onClose={() => setDialog(null)} />}
+    </div>
+  );
+}
+
+/** Readings table columns, shared by the paged panel and the "View all" dialog. */
+function useReadingColumns() {
+  const { t } = useT();
+  const columns: Column<ReadingRow>[] = [
+    { key: 'ts', header: t('fd.colTime'), className: 'whitespace-nowrap', cell: (r) => time(r.ts) },
+    {
+      key: 'temp',
+      header: '°C',
+      align: 'right',
+      cell: (r) => (r.temp === null ? '–' : r.temp.toFixed(2)),
+    },
+    {
+      key: 'door',
+      header: t('fd.colDoor'),
+      cell: (r) => (r.door ? t('fd.open') : t('fd.closed')),
+    },
+    {
+      key: 'comp',
+      header: t('fd.colComp'),
+      cell: (r) => (r.comp ? t('fd.on') : t('fd.off')),
+    },
+    {
+      key: 'power',
+      header: t('fd.colPower'),
+      cell: (r) => (r.power === 'BATTERY' ? fmt(t('fd.battery'), { n: r.batt }) : t('fd.mains')),
+    },
+    {
+      key: 'late',
+      header: t('fd.colArrival'),
+      cell: (r) =>
+        r.seeded ? (
+          <span className="text-ink-3">{t('fd.seeded')}</span>
+        ) : r.late ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning-wash px-2 py-0.5 text-xs font-semibold text-warning">
+            <CloudUpload aria-hidden className="size-3" />
+            {t('fd.lateSynced')}
+          </span>
+        ) : (
+          <span className="text-ink-3">{t('fd.live')}</span>
+        ),
+    },
+  ];
+  return columns;
+}
+
+/** Event timeline, 15 per page, with every loaded event in a dialog. */
+function EventsPanel({ events }: { events: DeviceEvent[] }) {
+  const { t } = useT();
+  const paged = usePaged(events);
+  const [all, setAll] = useState(false);
+  const title = t('fd.eventTimeline');
+  return (
+    <Panel
+      title={title}
+      bodyClassName=""
+      actions={
+        events.length > 0 && (
+          <Button
+            variant="ghost"
+            className="min-h-9 px-2.5"
+            onClick={() => setAll(true)}
+            icon={<List aria-hidden className="size-4" />}
+          >
+            {fmt(t('pager.viewAll'), { n: events.length })}
+          </Button>
+        )
+      }
+    >
+      <div className="px-4 py-1">
+        <Timeline events={paged.rows} />
+      </div>
+      <Pager {...paged} label={title} />
+      <Modal
+        wide
+        open={all}
+        onClose={() => setAll(false)}
+        title={fmt(t('pager.allTitle'), { list: title, n: events.length })}
+      >
+        <div className="px-5 py-1">
+          <Timeline events={events} />
+        </div>
+      </Modal>
+    </Panel>
+  );
+}
+
+/** Recent readings, 15 per page, with every loaded reading in a dialog. */
+function ReadingsPanel({ readings }: { readings: ReadingRow[] }) {
+  const { t } = useT();
+  const columns = useReadingColumns();
+  const paged = usePaged(readings);
+  const [all, setAll] = useState(false);
+  const title = t('fd.recentReadings');
+  return (
+    <Panel
+      title={title}
+      bodyClassName=""
+      actions={
+        readings.length > 0 && (
+          <Button
+            variant="ghost"
+            className="min-h-9 px-2.5"
+            onClick={() => setAll(true)}
+            icon={<List aria-hidden className="size-4" />}
+          >
+            {fmt(t('pager.viewAll'), { n: readings.length })}
+          </Button>
+        )
+      }
+    >
+      {readings.length === 0 ? (
+        <EmptyState title={t('fd.noReadings')}>{t('fd.noReadingsBody')}</EmptyState>
+      ) : (
+        <>
+          <Table<ReadingRow> caption={title} rows={paged.rows} rowKey={(r) => r.seq} columns={columns} />
+          <Pager {...paged} label={title} />
+        </>
+      )}
+      <Modal
+        wide
+        open={all}
+        onClose={() => setAll(false)}
+        title={fmt(t('pager.allTitle'), { list: title, n: readings.length })}
+      >
+        <Table<ReadingRow> caption={title} rows={readings} rowKey={(r) => r.seq} columns={columns} />
+      </Modal>
+    </Panel>
+  );
+}
+
 export function FridgeDetailPage() {
+  const { t } = useT();
   const { id = '' } = useParams();
   const { data, isPending, error, refetch } = useFridge(id);
   const now = useServerNow(1000);
+  const { user } = useAuth();
 
   if (isPending)
     return (
       <>
-        <PageHeader title="Fridge" />
+        <PageHeader title={t('page.fridge.title')} />
         <div className="grid gap-5 xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.6fr)]">
           <Skeleton className="h-[26rem]" />
           <Skeleton className="h-[26rem]" />
@@ -449,81 +777,37 @@ export function FridgeDetailPage() {
   if (error)
     return (
       <>
-        <PageHeader title="Fridge" />
+        <PageHeader title={t('page.fridge.title')} />
         <Panel>
           <ErrorState error={error} onRetry={() => void refetch()} />
         </Panel>
       </>
     );
 
-  const { fridge, events, readings } = data;
+  const { fridge, events, readings, sim_controls } = data;
   return (
     <>
       <PageHeader
         title={fridge.name}
-        subtitle={`${fridge.id} · node ${fridge.device_id ?? 'not registered'}`}
-        actions={
-          <Link to="/fridges" className="text-sm font-semibold text-teal-strong underline">
-            All fridges
-          </Link>
-        }
+        subtitle={`${fridge.id} · node ${fridge.device_id ?? 'not registered'}${
+          fridge.calibration_offset_c
+            ? ` · sensor offset ${fridge.calibration_offset_c > 0 ? '+' : ''}${fridge.calibration_offset_c} °C`
+            : ''
+        }`}
+        actions={<DetailActions fridge={fridge} />}
       />
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.6fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <FridgeCard fridge={fridge} now={now} />
+          {sim_controls && can(user?.role, 'device:test') && <SimControls fridge={fridge} now={now} />}
           <AiPanel fridgeId={fridge.id} now={now} />
         </div>
         <div className="flex min-w-0 flex-col gap-5">
           <HistoryChart fridgeId={fridge.id} />
           <BudgetPanel fridge={fridge} now={now} />
           <div className="grid gap-5 2xl:grid-cols-2">
-            <Panel title="Event timeline" bodyClassName="px-4 py-1 max-h-[28rem] overflow-y-auto">
-              <Timeline events={events} />
-            </Panel>
-            <Panel title="Recent readings" bodyClassName="">
-              {readings.length === 0 ? (
-                <EmptyState title="No readings yet">
-                  Readings arrive every 5 seconds once the node is online.
-                </EmptyState>
-              ) : (
-                <Table<ReadingRow>
-                  caption="Most recent readings"
-                  rows={readings}
-                  rowKey={(r) => r.seq}
-                  columns={[
-                    { key: 'ts', header: 'Time', cell: (r) => time(r.ts) },
-                    {
-                      key: 'temp',
-                      header: '°C',
-                      align: 'right',
-                      cell: (r) => (r.temp === null ? '–' : r.temp.toFixed(2)),
-                    },
-                    { key: 'door', header: 'Door', cell: (r) => (r.door ? 'Open' : 'Closed') },
-                    { key: 'comp', header: 'Comp.', cell: (r) => (r.comp ? 'On' : 'Off') },
-                    {
-                      key: 'power',
-                      header: 'Power',
-                      cell: (r) => (r.power === 'BATTERY' ? `Battery ${r.batt} %` : 'Mains'),
-                    },
-                    {
-                      key: 'late',
-                      header: 'Arrival',
-                      cell: (r) =>
-                        r.seeded ? (
-                          <span className="text-ink-3">seeded</span>
-                        ) : r.late ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-warning-wash px-2 py-0.5 text-xs font-semibold text-warning">
-                            <CloudUpload aria-hidden className="size-3" />
-                            late · synced
-                          </span>
-                        ) : (
-                          <span className="text-ink-3">live</span>
-                        ),
-                    },
-                  ]}
-                />
-              )}
-            </Panel>
+            <EventsPanel events={events} />
+            <ReadingsPanel readings={readings} />
           </div>
         </div>
       </div>

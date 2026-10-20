@@ -28,7 +28,9 @@ test('weak compressor: health drops, a plan appears, the pharmacist confirms, in
     },
   );
 
-  const { token } = (await (await request.post('/api/auth/login', { data: E2E_PHARMACIST })).json()) as {
+  const { token } = (await (
+    await request.post('/api/auth/login', { data: E2E_PHARMACIST, headers: { 'X-Auth-Mode': 'token' } })
+  ).json()) as {
     token: string;
   };
   const names = [`AI-Measles-${Date.now() % 100000}`, `AI-Polio-${Date.now() % 100000}`];
@@ -69,8 +71,20 @@ test('weak compressor: health drops, a plan appears, the pharmacist confirms, in
   for (const name of names)
     await expect(plan.getByRole('row').filter({ hasText: name })).toContainText('Vaccine Fridge B');
 
-  await plan.getByRole('button', { name: 'Confirm relocation' }).click();
-  await expect(page.getByText(/Relocation confirmed: \d+ batch/)).toBeVisible({ timeout: 15_000 });
+  // One click confirms the plan on screen. Here the scheduler re-plans every 5 s: if the plan changed between
+  // reading and clicking, the server refuses (409 PLAN_CHANGED), nothing moves, and the UI shows the updated
+  // plan and says so. The pharmacist then confirms that one, exactly as a person would.
+  const confirmed = page.getByText(/Relocation confirmed: \d+ batch/);
+  for (let attempt = 1; ; attempt++) {
+    await plan.getByRole('button', { name: 'Confirm relocation' }).click();
+    try {
+      await expect(confirmed).toBeVisible({ timeout: 10_000 });
+      break;
+    } catch (err) {
+      if (attempt === 3 || !(await page.getByText(/The situation changed, so nothing was moved/).isVisible()))
+        throw err;
+    }
+  }
 
   await page.goto('/inventory');
   for (const name of names)

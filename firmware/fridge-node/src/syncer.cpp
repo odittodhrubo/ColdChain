@@ -33,13 +33,14 @@ bool Syncer::due(uint32_t now_ms, bool uplink) {
 size_t Syncer::chunkSize() const { return buf_.size() < cc::SYNC_CHUNK ? buf_.size() : cc::SYNC_CHUNK; }
 
 void Syncer::sent(uint32_t now_ms) {
+  buf_.markSent(chunkSize());
   waiting_ = true;
   sentAt_ = now_ms;
 }
 
 bool Syncer::onAck(uint32_t seq_upto) {
   if (buf_.empty() || seq_upto < buf_.at(0).seq) return false;  // late duplicate ack: nothing new
-  buf_.freeUpTo(seq_upto);
+  buf_.freeSentUpTo(seq_upto);  // entries replayed in after the chunk went out are not acknowledged by it
   acked_ = seq_upto;
   waiting_ = false;
   retries_ = 0;

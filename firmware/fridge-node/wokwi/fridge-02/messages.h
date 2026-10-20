@@ -3,6 +3,7 @@
 // The body is serialised once, signed, and embedded as a JSON string; it is never re-serialised after signing.
 #pragma once
 #include <ArduinoJson.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,6 +24,7 @@ struct Reading {
   bool latch;
   bool manualMode;
   bool doorReason;  // reason "door" (immediate on a door change) instead of "periodic"
+  float ambient;    // A3: room temperature from the optional outside sensor; NAN = none, omitted from the body
 };
 
 // Fields only live telemetry carries (a sync reading omits buf, rssi and fw).

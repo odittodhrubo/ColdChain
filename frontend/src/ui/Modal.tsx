@@ -11,12 +11,14 @@ export function Modal({
   title,
   children,
   footer,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean; // a long list or table to read in full, scrolling inside the dialog
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -42,7 +44,7 @@ export function Modal({
         e.preventDefault();
         onClose();
       }}
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-[var(--radius-label)] border border-rule bg-panel p-0 text-ink shadow-[0_18px_48px_rgb(15_27_42/0.22)] backdrop:bg-[rgb(10_18_28/0.45)]"
+      className={`m-auto ${wide ? 'w-[min(72rem,calc(100vw-2rem))]' : 'w-[min(32rem,calc(100vw-2rem))]'} rounded-[var(--radius-label)] border border-rule bg-panel p-0 text-ink shadow-[0_18px_48px_rgb(15_27_42/0.22)] backdrop:bg-[rgb(10_18_28/0.45)]`}
     >
       {open && (
         <>
@@ -59,7 +61,7 @@ export function Modal({
               <X aria-hidden className="size-4" />
             </button>
           </header>
-          <div className="px-5 py-4">{children}</div>
+          <div className={wide ? 'max-h-[80vh] overflow-y-auto' : 'px-5 py-4'}>{children}</div>
           {footer && (
             <footer className="flex justify-end gap-2 border-t border-rule px-5 py-3">{footer}</footer>
           )}

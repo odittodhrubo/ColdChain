@@ -17,7 +17,7 @@ flowchart LR
     VN["virtual node (Python port of the firmware)"]
   end
   B[("MQTT broker")]
-  subgraph Backend["Backend: Node 20 · Express · SQLite"]
+  subgraph Backend["Backend: Node 22 · Express · SQLite"]
     ING["ingestion<br/>HMAC · ±30 s · nonce · seq/sync"]
     HEAT["heat-exposure engine<br/>per batch, ×1 / ×2"]
     ALR["alerts<br/>in-app · Telegram · email"]

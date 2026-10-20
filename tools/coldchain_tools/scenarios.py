@@ -7,6 +7,7 @@ through the REST API, the way the UI sees it, plus the database for ordering / d
     python -m coldchain_tools.scenarios                 # quick: shortened waits, about 12 minutes
     python -m coldchain_tools.scenarios --full          # the spec's durations, door-ajar lead time (~45 min)
     python -m coldchain_tools.scenarios --only S3 S7    # a subset
+    python -m coldchain_tools.scenarios --acl           # with per-account broker ACLs (S4 in improve.md)
 
 DEMO_TIME_SCALE=60 here (a 60-minute heat budget lasts 60 s at x1) and the nodes run their physics 4x faster
 for S1-S6; S10 restarts a clean stack at real speed, which is what the models were trained on.
@@ -15,6 +16,7 @@ for S1-S6; S10 restarts a clean stack at real speed, which is what the models we
 from __future__ import annotations
 
 import argparse
+import json
 import secrets
 import sqlite3
 import sys
@@ -24,6 +26,7 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import attack, tamper
 from .sim_engine import AJAR_K
@@ -53,8 +56,11 @@ def until(fn: Callable, timeout: float, msg: str, every: float = 1.0):
 
 
 class Run:
-    def __init__(self, full: bool):
+    def __init__(self, full: bool, acl: bool = False):
         self.full = full
+        self.acl = (
+            acl  # per-account broker ACL: backend, each device and the test tools on their own accounts
+        )
         self.tmp = Path(tempfile.mkdtemp(prefix="coldchain-scenarios-"))
         self.stack: Stack | None = None
         self.nodes: dict = {}
@@ -74,6 +80,7 @@ class Run:
             demo_scale=60,
             ml_interval_ms=5000,
             logs=self.tmp / "logs",
+            acl=self.acl,
         )
         self.stack.logs.mkdir(parents=True, exist_ok=True)
         self.stack.up(hours=hours, weak=weak)
@@ -383,9 +390,9 @@ class Run:
                 "--url",
                 self.stack.mqtt_url,
                 "--username",
-                "",
+                self.stack.mqtt_auth("coldchain")[0],  # the test account: it may inject any device's uplink
                 "--password",
-                "",
+                self.stack.mqtt_auth("coldchain")[1],
                 "--prefix",
                 self.stack.prefix,
             ]
@@ -469,8 +476,65 @@ class Run:
                     wrong.append(f"{role} {method} {path} -> {status}")
         check(not wrong, "RBAC mismatches: " + "; ".join(wrong))
 
+    def s_rotate(self) -> None:
+        """Rotate fridge-01's secret live: telemetry carries on, the old key is refused afterwards (S7)."""
+        f, start = "fridge-01", time.time()
+        old = self.stack.secrets[f]
+        status, body = self.stack.call(
+            "POST", f"/api/devices/{f}/rotate-secret", self.tokens["ADMIN"], {"reason": "scenario SR"}
+        )
+        check(status == 202, f"rotate -> {status} {body}")
+
+        def device() -> dict:
+            return next(d for d in self.get("/api/security/summary")["devices"] if d["device_id"] == f)
+
+        until(lambda: not device()["rotation_pending"], 60, "the node confirmed the new secret")
+        check(device()["secret_rotated_at"], "secret_rotated_at not set")
+        until(lambda: self.readings(f, start + 1), 30, "telemetry after the rotation")
+        # a message signed with the old secret is refused now
+        import paho.mqtt.client as mqtt
+
+        from .contracts import topic
+        from .envelope import build
+
+        u = urlparse(self.stack.mqtt_url)
+        c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"scn-rotate-{secrets.token_hex(3)}")
+        c.username_pw_set(*self.stack.mqtt_auth("coldchain"))
+        c.connect(u.hostname, u.port)
+        c.loop_start()
+
+        def bad_sigs() -> int:  # this device's BAD_SIG rejections so far (a node in flight may add one too)
+            return self.get(f"/api/security/events?reason=BAD_SIG&device_id={f}&pageSize=1")["total"]
+
+        before = bad_sigs()
+        # the signature is checked before the body, so any body shows the key is refused
+        c.publish(
+            topic(self.stack.prefix, f, "telemetry"), build(old, f, "telemetry", json.dumps({"probe": 1}))
+        )
+        time.sleep(1)
+        c.loop_stop()
+        c.disconnect()
+
+        until(lambda: bad_sigs() > before, 20, "old-secret message refused as BAD_SIG")
+        self.stack.secrets[f] = "rotated"  # the tools' copy is stale now: nothing later may use it
+        self.notes.append("SR: secret rotated live, telemetry continued, old key refused (BAD_SIG)")
+
+    def holes(self, fridge: str, seq0: int) -> list[int]:
+        """Device seqs missing above seq0 (readings and events share the counter); fails on a duplicate."""
+        with self.db() as db:
+            stored = sorted(
+                r[0]
+                for r in db.execute(
+                    "SELECT seq FROM readings WHERE fridge_id = ? AND seq > ? UNION ALL "
+                    "SELECT seq FROM events WHERE fridge_id = ? AND seq > ?",
+                    (fridge, seq0, fridge, seq0),
+                )
+            )
+        check(len(stored) == len(set(stored)), "duplicate seq stored")
+        return [s for a, b in zip(stored, stored[1:], strict=False) for s in range(a + 1, b)]
+
     def failures(self) -> None:
-        """Kill the ML service, the broker and the backend mid-run; everything degrades and recovers."""
+        """Kill the ML service, the broker and the backend mid-run: graceful degradation, no data lost."""
         f = "fridge-01"
         # ML down: the rule-based fallback answers, marked stale; back up: the model again
         self.stack.stop("ml")
@@ -495,38 +559,28 @@ class Run:
         until(
             lambda: len(self.nodes[f].uplink.buffer) == 0, 180, "buffer synced after broker restart", every=2
         )
-        time.sleep(3)
+        # a message in the dying socket was lost (QoS 0): a seq gap, refilled from the replay window
+        until(lambda: not self.holes(f, seq0), 120, "broker-restart gap refilled (SYNC_REQUEST)", every=3)
+        self.notes.append("FI: broker restart: buffer synced, in-flight losses replayed, seq contiguous")
+        # backend down: the nodes keep publishing live (the broker drops it: QoS 0, nobody subscribed).
+        # When the backend is back it sees the seq gap from what it stored, sends SYNC_REQUEST
+        # {from_seq, to_seq}, and the node replays that range from its live-sent window (R1). Nothing is lost.
         with self.db() as db:
-            seqs = [
-                r[0]
-                for r in db.execute(
-                    "SELECT seq FROM readings WHERE fridge_id = ? AND seq > ? UNION ALL "
-                    "SELECT seq FROM events WHERE fridge_id = ? AND seq > ? ORDER BY 1",
-                    (f, seq0, f, seq0),
-                )
-            ]
-        missing = sum(b - a - 1 for a, b in zip(seqs, seqs[1:], strict=False) if b != a + 1)
-        check(len(seqs) == len(set(seqs)), "duplicate seq after the broker restart")
-        # QoS 0: a message already in the dying socket is gone (KNOWN_ISSUES.md); the buffer covers the rest
-        check(
-            missing <= 2, f"{missing} messages lost across the broker restart (more than the in-flight ones)"
-        )
-        self.notes.append(f"FI: broker restart: {len(seqs)} messages stored, {missing} lost in flight")
-        # backend down: it comes back, reconnects and ingests again (QoS 0 messages sent meanwhile are gone)
+            seq0 = db.execute("SELECT MAX(seq) FROM readings WHERE fridge_id = ?", (f,)).fetchone()[0]
         self.stack.stop("backend")
-        down_at = time.time()
-        time.sleep(20)
+        time.sleep(60)
         self.stack.start("backend")
         self.tokens = {r: self.stack.login(r) for r in self.tokens}
         until(lambda: self.readings(f, time.time() - 10), 60, "ingesting again after backend restart")
+        # GAP_SYNC_AFTER_MS (30 s) after the first message, then the replayed chunks
+        until(lambda: not self.holes(f, seq0), 120, "backend-outage gap refilled (replay window)", every=3)
         with self.db() as db:
-            gap = db.execute(
-                "SELECT MIN(ts) FROM readings WHERE fridge_id = ? AND seeded = 0 AND ts > ?",
-                (f, int(down_at)),
+            late = db.execute(
+                "SELECT COUNT(*) FROM readings WHERE fridge_id = ? AND seq > ? AND late = 1", (f, seq0)
             ).fetchone()[0]
         self.notes.append(
-            f"FI: ML fallback + recovery; broker restart lossless; backend gap {gap - down_at:.0f} s "
-            "(QoS 0 messages during the outage are not recoverable: KNOWN_ISSUES.md)"
+            f"FI: ML fallback + recovery; broker restart lossless; backend down 60 s: {late} readings "
+            "replayed after SYNC_REQUEST, seq contiguous"
         )
 
     def s10_ai(self) -> None:
@@ -640,6 +694,7 @@ SCENARIOS = {
     "S7": Run.s7_security,
     "S8": Run.s8_tamper,
     "S9": Run.s9_rbac,
+    "SR": Run.s_rotate,
     "FI": Run.failures,
     "S10": Run.s10_ai,
 }
@@ -650,9 +705,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--full", action="store_true", help="the spec's durations and the door-ajar lead time")
     ap.add_argument("--only", nargs="*", choices=list(SCENARIOS), help="run these (S2 needs S1's data)")
+    ap.add_argument("--acl", action="store_true", help="per-account broker ACL (backend, devices, tools)")
     args = ap.parse_args(argv)
     names = args.only or list(SCENARIOS)
-    run = Run(args.full)
+    run = Run(args.full, args.acl)
     results: list[tuple[str, str, float]] = []
     try:
         if any(n != "S10" for n in names):

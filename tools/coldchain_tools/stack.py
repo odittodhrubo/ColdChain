@@ -3,9 +3,10 @@
     python -m coldchain_tools.stack demo            # make demo: reset + seed + 6 h history, everything up
     python -m coldchain_tools.stack demo --no-ui --no-nodes --hours 2
 
-`demo` RESETS the configured database (DB_PATH), seeds users, both fridges and eight batches in varied states,
-backfills seeded history (labelled in the UI), starts what is not already running, starts a virtual node for
-each fridge whose Wokwi node is not online, prints the credentials and QR URLs, and runs until Ctrl-C.
+`demo` RESETS the configured database (DB_PATH), seeds users, both fridges and ten batches (five each) in
+varied states, backfills seeded history (labelled in the UI), starts what is not already running, starts a
+virtual node for each fridge whose Wokwi node is not online, prints the credentials and QR URLs, and runs
+until Ctrl-C.
 
 The scenario tests (coldchain_tools.scenarios) use the Stack class with their own ports and a throwaway DB.
 """
@@ -38,6 +39,8 @@ DEMO_PASSWORDS = {
     "INSPECTOR": "Demo-Insp-2026!",
 }
 EMAILS = {r: f"{r.lower()}@coldchain.local" for r in DEMO_PASSWORDS}
+# Browsers get the session as an HttpOnly cookie; scripts ask for the token in the login body (S1).
+TOKEN_IN_BODY = {"X-Auth-Mode": "token"}
 FRIDGES = ("fridge-01", "fridge-02")
 IS_WIN = os.name == "nt"
 
@@ -56,6 +59,19 @@ def npx() -> str:
     return found
 
 
+def lan_ip() -> str:
+    """This machine's IP on the local network, so a QR code opens on a phone on the same Wi-Fi, not on the
+    phone's own localhost. Falls back to 127.0.0.1 when offline."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 def reachable(url: str) -> bool:
     u = urlparse(url)
     port = u.port or {"http": 80, "https": 443, "mqtt": 1883, "mqtts": 8883}.get(u.scheme, 80)
@@ -66,10 +82,19 @@ def reachable(url: str) -> bool:
         return False
 
 
-def http_json(method: str, url: str, token: str | None = None, body: dict | None = None, timeout: float = 10):
+def http_json(
+    method: str,
+    url: str,
+    token: str | None = None,
+    body: dict | None = None,
+    timeout: float = 10,
+    headers: dict[str, str] | None = None,
+):
     """(status, parsed JSON or None). Never raises on an HTTP error status."""
     req = urllib.request.Request(url, method=method, data=None if body is None else json.dumps(body).encode())
     req.add_header("Content-Type", "application/json")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
@@ -121,6 +146,9 @@ class Stack:
     logs: Path = field(default_factory=lambda: Path(tempfile.mkdtemp(prefix="coldchain-stack-")))
     procs: dict[str, Proc] = field(default_factory=dict)
     seeded: dict = field(default_factory=dict)
+    # Per-account broker ACL (backend/src/scripts/broker-acl.ts): the backend, each device and the test tools
+    # get their own account. Only with the local dev broker this Stack starts itself.
+    acl: bool = False
 
     def __post_init__(self):
         env = dotenv()
@@ -130,6 +158,21 @@ class Stack:
         }
         if not env.get("JWT_SECRET") and not os.environ.get("JWT_SECRET"):
             raise SystemExit("no .env: run `node tools/init_env.js` (npm run env:init) first")
+        if self.acl and not self._local_broker:
+            raise SystemExit("acl=True needs the local dev broker (a hosted broker has its own ACLs)")
+        # throwaway passwords, one per account, for this run only
+        self.accounts = (
+            {u: secrets.token_urlsafe(12) for u in ("backend", "coldchain", *FRIDGES)} if self.acl else {}
+        )
+
+    def mqtt_auth(self, account: str = "backend") -> tuple[str, str]:
+        """(username, password) for an account: per-account with acl, none on the open local broker, the .env
+        credentials on a hosted one (shared by everything)."""
+        if self.acl:
+            return account, self.accounts[account]
+        if self._local_broker:
+            return "", ""
+        return setting("MQTT_USERNAME", ""), setting("MQTT_PASSWORD", "")
 
     # ------------------------------------------------------------------ processes
 
@@ -149,12 +192,14 @@ class Stack:
                 "PORT": str(self.api_port),
                 "MQTT_URL": self.mqtt_url,
                 "MQTT_TOPIC_PREFIX": self.prefix,
-                # the local dev broker has no accounts; a hosted one uses the .env credentials
-                "MQTT_USERNAME": "" if self._local_broker else setting("MQTT_USERNAME", ""),
-                "MQTT_PASSWORD": "" if self._local_broker else setting("MQTT_PASSWORD", ""),
+                # the backend's broker account (see mqtt_auth)
+                "MQTT_USERNAME": self.mqtt_auth("backend")[0],
+                "MQTT_PASSWORD": self.mqtt_auth("backend")[1],
                 "ML_URL": self.ml_url,
                 "ML_INTERVAL_MS": str(self.ml_interval_ms),
                 "DEMO_TIME_SCALE": str(self.demo_scale),
+                # the demo web app can drive the virtual nodes (door, temp, power, Wi-Fi)
+                "SIM_CONTROLS": "true",
                 "SEED_ADMIN_PASSWORD": self.passwords["ADMIN"],
                 "SEED_PHARMACIST_PASSWORD": self.passwords["PHARMACIST"],
                 "SEED_INSPECTOR_PASSWORD": self.passwords["INSPECTOR"],
@@ -163,7 +208,8 @@ class Stack:
         )
         if self.web_port:
             e["CORS_ORIGIN"] = f"http://localhost:{self.web_port}"
-            e["PUBLIC_BASE_URL"] = f"http://localhost:{self.web_port}"
+            # QR codes and public links a phone scans must point at this machine, not the phone's localhost
+            e["PUBLIC_BASE_URL"] = f"http://{lan_ip()}:{self.web_port}"
         return e
 
     @property
@@ -195,8 +241,10 @@ class Stack:
         """Start one service (also used to bring it back after failure injection)."""
         if name == "broker":
             port = urlparse(self.mqtt_url).port or 1883
-            self.spawn("broker", [npx(), "tsx", "src/scripts/broker.ts"], ROOT / "backend",
-                       {**self.env(), "BROKER_PORT": str(port)})  # fmt: skip
+            env = {**self.env(), "BROKER_PORT": str(port)}
+            if self.acl:
+                env["BROKER_ACCOUNTS"] = ",".join(f"{u}:{p}" for u, p in self.accounts.items())
+            self.spawn("broker", [npx(), "tsx", "src/scripts/broker.ts"], ROOT / "backend", env)
             self.wait("broker", lambda: reachable(self.mqtt_url))
         elif name == "ml":
             self.spawn("ml", [python(), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
@@ -218,7 +266,7 @@ class Stack:
             p.stop()
 
     def seed(self, hours: float, weak: dict[str, float] | None = None) -> dict:
-        """Fresh database: users, fridges, the eight demo batches, `hours` of seeded history."""
+        """Fresh database: users, fridges, the ten demo batches, `hours` of seeded history."""
         out = subprocess.run([npx(), "tsx", "src/scripts/demo-seed.ts", "--reset"], cwd=ROOT / "backend",
                              env=self.env(), capture_output=True, text=True, encoding="utf-8")  # fmt: skip
         line = next(
@@ -234,6 +282,10 @@ class Stack:
         return self.seeded
 
     def up(self, hours: float = 6, ui: bool = False, weak: dict[str, float] | None = None) -> Stack:
+        if self.acl and reachable(self.mqtt_url):
+            raise SystemExit(
+                f"acl=True starts its own broker, but something already listens on {self.mqtt_url}"
+            )
         if self._local_broker and not reachable(self.mqtt_url):
             self.start("broker")
         self.seed(hours, weak)
@@ -252,7 +304,8 @@ class Stack:
 
     def login(self, role: str) -> str:
         status, body = http_json("POST", f"{self.api}/api/auth/login",
-                                 body={"email": EMAILS[role], "password": self.passwords[role]})  # fmt: skip
+                                 body={"email": EMAILS[role], "password": self.passwords[role]},
+                                 headers=TOKEN_IN_BODY)  # fmt: skip
         if status != 200:
             raise RuntimeError(f"login {role} failed: {status} {body}")
         return body["token"]
@@ -263,8 +316,10 @@ class Stack:
     def node(self, fridge: str, thermal_speed: float = 1.0):
         from .virtual_node import NodeRunner
 
-        return NodeRunner(fridge, self.secrets[fridge], self.mqtt_url, self.env()["MQTT_USERNAME"],
-                          self.env()["MQTT_PASSWORD"], self.prefix, thermal_speed).start()  # fmt: skip
+        user, password = self.mqtt_auth(fridge)  # with acl: the device's own account
+        # the node carries on from the seeded history: not a reboot, so no 60 s boot lock
+        return NodeRunner(fridge, self.secrets[fridge], self.mqtt_url, user, password, self.prefix,
+                          thermal_speed, boot_lock=False).start()  # fmt: skip
 
 
 def wokwi_online(url: str, username: str, password: str, prefix: str, wait_s: float = 3.0) -> set[str]:
@@ -293,6 +348,23 @@ def wokwi_online(url: str, username: str, password: str, prefix: str, wait_s: fl
     return online
 
 
+def parse_weak(items: list[str]) -> dict[str, float]:
+    """["fridge-02=0.4"] -> {"fridge-02": 0.4}: compressor efficiency per fridge (1.0 = healthy)."""
+    weak: dict[str, float] = {}
+    for item in items:
+        fridge, _, value = item.partition("=")
+        if fridge not in FRIDGES or not value:
+            raise SystemExit(f"--weak expects FRIDGE=EFFICIENCY with FRIDGE in {FRIDGES}, got {item!r}")
+        try:
+            eff = float(value)
+        except ValueError:
+            raise SystemExit(f"--weak efficiency must be a number, got {value!r}") from None
+        if not 0 < eff <= 1:
+            raise SystemExit(f"--weak efficiency must be in (0, 1], got {eff}")
+        weak[fridge] = eff
+    return weak
+
+
 def demo(args: argparse.Namespace) -> int:
     db = Path(setting("DB_PATH", "./data/coldchain.db"))
     db = db if db.is_absolute() else ROOT / "backend" / db
@@ -308,9 +380,10 @@ def demo(args: argparse.Namespace) -> int:
         raise SystemExit(
             f"something already listens on {stack.api}: stop the backend first (demo resets its DB)"
         )
+    weak = parse_weak(args.weak)
     print(f"Resetting {db} and seeding the demo ...")
     try:
-        stack.up(hours=args.hours, ui=not args.no_ui)
+        stack.up(hours=args.hours, ui=not args.no_ui, weak=weak)
         nodes = []
         if not args.no_nodes:
             env = stack.env()
@@ -320,6 +393,7 @@ def demo(args: argparse.Namespace) -> int:
                     print(f"  {f}: a node is already online (Wokwi?), not starting a virtual one")
                     continue
                 node = stack.node(f)
+                node.act("eff", weak.get(f, 1.0))
                 node.act("temp", stack.seeded.get("last_temp", {}).get(f, 5.0))  # carry on from the history
                 nodes.append(node)
         s = stack.seeded
@@ -327,11 +401,16 @@ def demo(args: argparse.Namespace) -> int:
             "\nColdChain demo is running"
             + (f": open http://localhost:{stack.web_port}" if stack.web_port else "")
         )
+        if stack.web_port:
+            print(f"  On a phone (same Wi-Fi): http://{lan_ip()}:{stack.web_port} - QR codes point here")
         print(f"  API {stack.api} · ML {stack.ml_url} · MQTT {mqtt_url} · logs {stack.logs}")
         print(
             f"  {args.hours:g} h of SEEDED history before now (labelled in the UI); "
             f"DEMO_TIME_SCALE={stack.demo_scale:g}"
         )
+        if weak:
+            simulated = ", ".join(f"{f} at {e:g}" for f, e in weak.items())
+            print(f"  SIMULATED weak compressor: {simulated} (history and virtual node; disclose it)")
         print("\n  Demo users:")
         for role, pw in stack.passwords.items():
             print(f"    {role:<10} {EMAILS[role]:<28} {pw}")
@@ -357,6 +436,7 @@ def demo(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows consoles default to cp1252
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="reset + seed + run everything")
@@ -364,6 +444,13 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--no-ui", action="store_true")
     d.add_argument("--no-nodes", action="store_true", help="do not start virtual nodes")
     d.add_argument("--mqtt", help="broker URL (default MQTT_URL from .env; a local one is started if needed)")
+    d.add_argument(
+        "--weak",
+        action="append",
+        default=[],
+        metavar="FRIDGE=EFF",
+        help="simulate a weak compressor, e.g. fridge-02=0.4 (seeded history and virtual node)",
+    )
     args = ap.parse_args(argv)
     return demo(args)
 

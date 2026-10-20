@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import time
+import zlib
 
 from .sim_engine import run_offline
 
@@ -37,7 +38,10 @@ def backfill(db_path: str, hours: float, fridges: dict[str, float], end_ts: int 
                 raise SystemExit(f"no device for {fid}: seed the database first")
             rows = []
             script = [(0, "eff", eff)] if eff != 1.0 else []
-            sim = run_offline(end - start - 5, device_id=fid, seed=seed, start_ts=start, scenario=script)
+            # Per-fridge seed: each fridge gets its own noise and compressor phase, so the two histories (and
+            # the charts, last temps and live nodes that carry on from them) differ instead of being twins.
+            fseed = seed ^ zlib.crc32(fid.encode())
+            sim = run_offline(end - start - 5, device_id=fid, seed=fseed, start_ts=start, scenario=script)
             for m, _ in sim:
                 if m.kind != "telemetry":
                     continue

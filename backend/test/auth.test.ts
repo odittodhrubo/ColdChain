@@ -13,6 +13,7 @@ describe('login', () => {
     const res = await t
       .http()
       .post('/api/auth/login')
+      .set('X-Auth-Mode', 'token') // scripts and tools ask for the token in the body (S1)
       .send({ email: user.email.toUpperCase(), password: PASSWORD });
     expect(res.status).toBe(200);
     expect(res.body.user).toEqual({ id: user.id, email: user.email, name: user.name, role: 'PHARMACIST' });

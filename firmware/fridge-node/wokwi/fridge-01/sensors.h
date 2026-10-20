@@ -7,7 +7,14 @@
 namespace sensors {
 void begin();  // one blocking first conversion in setup(), so manual mode has a value at boot
 void update(uint32_t now_ms);
-float tempC();  // last valid reading, NAN if none yet
+float tempC();  // last valid reading with the calibration offset applied (P4), NAN if none yet
+// P4: set the persisted calibration offset (clamped to ±CALIBRATION_MAX_C); returns the stored value. The
+// current offset in °C.
+float setCalibration(float offset_c);
+float calibrationC();
+// A3: optional second DS18B20 outside the fridge (room temperature). NAN when no second probe is on the bus,
+// so single-sensor nodes (and Wokwi) never send an ambient field.
+float ambientC();
 // True when the probe is missing, returns -127 (disconnected) or 85 (power-on value), or has not produced a
 // valid reading for DS_STALE_MS.
 bool fault();

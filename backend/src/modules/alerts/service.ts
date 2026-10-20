@@ -23,6 +23,7 @@ export const ALERT_TYPES = [
   'PREDICTED_BREACH', // P18
   'COMPRESSOR_WEAK', // P18
   'RELOCATION_PROPOSED', // P18
+  'FORECAST_DRIFT', // A1: live forecast error sustained above the offline test error
   'SECURITY_FLOOD',
 ] as const;
 export type AlertType = (typeof ALERT_TYPES)[number];
@@ -56,6 +57,7 @@ export interface AlertRow {
   notified_at: number | null;
   notify_count: number;
   delivery_status: string;
+  escalated_at: number | null; // P3: set once when an unacknowledged alert escalated
 }
 
 export interface RaiseInput {
@@ -117,6 +119,11 @@ export class AlertEngine {
       due: db.prepare(
         'SELECT * FROM alerts WHERE resolved_at IS NULL AND acknowledged_at IS NULL AND notified_at IS NOT NULL ORDER BY id',
       ),
+      toEscalate: db.prepare(
+        `SELECT * FROM alerts WHERE resolved_at IS NULL AND acknowledged_at IS NULL AND escalated_at IS NULL
+         AND notified_at IS NOT NULL AND severity IN ('WARNING', 'CRITICAL') AND created_at <= ? ORDER BY id`,
+      ),
+      escalated: db.prepare('UPDATE alerts SET escalated_at = ? WHERE id = ?'),
       doorWarnings: db.prepare(
         "SELECT * FROM alerts WHERE type = 'DOOR_OPEN_LONG' AND severity = 'WARNING' AND resolved_at IS NULL AND created_at <= ?",
       ),
@@ -199,16 +206,31 @@ export class AlertEngine {
   }
 
   /** One notification round, in the background: ingestion never waits for Telegram or SMTP. */
-  private notify(row: AlertRow, nowMs: number) {
+  private notify(row: AlertRow, nowMs: number, opts: { escalated?: boolean } = {}) {
     this.sql.notified.run(nowMs, row.id);
     const round = row.notify_count + 1;
     const data = JSON.parse(row.data) as { title?: string; lines?: string[]; link?: string };
+    const base = data.title ?? row.type;
+    const mins = Math.round((nowMs - row.created_at) / 60_000);
     const msg: AlertMessage = {
-      title: round > 1 ? `${data.title ?? row.type} (reminder ${round - 1})` : (data.title ?? row.type),
+      title: opts.escalated
+        ? `ESCALATED (unacknowledged ${mins} min): ${base}`
+        : round > 1
+          ? `${base} (reminder ${round - 1})`
+          : base,
       lines: data.lines ?? [],
       link: data.link,
       severity: (this.sql.byId.get(row.id) as AlertRow).severity,
     };
+    // P7: Web Push for breaches and the 5-min door alarm, so it reaches a closed tab. Fire-and-forget, tracked
+    // in `pending` so scripts can await idle(); never blocks ingestion.
+    if (msg.severity === 'CRITICAL' && this.ctx.push.enabled()) {
+      const push = this.ctx.push
+        .notify(msg)
+        .catch((err: Error) => logger.warn({ err: err.message, alertId: row.id }, 'web push failed'))
+        .finally(() => this.pending.delete(push));
+      this.pending.add(push);
+    }
     const delivery = this.notifier
       .send(msg)
       .then((res) => {
@@ -243,6 +265,16 @@ export class AlertEngine {
         nowMs,
       );
     }
+    // P3: escalate an alert still unacknowledged after ESCALATE_AFTER_S — one extra, flagged notification round.
+    // shortcut: escalation reuses the global alert channels; per-admin contacts and SMS need a provider this
+    // deployment has not configured. Upgrade when an SMS provider or per-user contacts exist.
+    const after = this.ctx.config.ESCALATE_AFTER_S;
+    if (after > 0)
+      for (const row of this.sql.toEscalate.all(nowMs - after * 1000) as AlertRow[]) {
+        this.sql.escalated.run(nowMs, row.id);
+        this.ctx.audit.append('system', 'ALERT_ESCALATED', { alert_id: row.id, key: row.key, after_s: after });
+        this.notify(this.sql.byId.get(row.id) as AlertRow, nowMs, { escalated: true });
+      }
     for (const row of this.sql.due.all() as AlertRow[])
       if (nowMs - row.notified_at! >= RENOTIFY_MS[row.severity]) this.notify(row, nowMs);
     for (const row of this.sql.floods.all() as AlertRow[]) {

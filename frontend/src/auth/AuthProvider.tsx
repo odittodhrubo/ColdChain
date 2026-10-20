@@ -2,50 +2,99 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, setUnauthorizedHandler } from '../lib/api';
 import { useToast } from '../ui/Toast';
-import { session, type Session, type SessionUser } from './session';
+import { session, sessionKey, type Session, type SessionResponse, type SessionUser } from './session';
+
+export type LoginResult = 'signed-in' | 'mfa';
+export type MfaProof = { code: string } | { recoveryCode: string };
 
 interface AuthState {
   user: SessionUser | null;
-  token: string | null;
-  login(email: string, password: string): Promise<void>;
+  /** Changes with every new sign-in (the realtime connection follows it); null when signed out. */
+  sessionKey: string | null;
+  mustChangePassword: boolean;
+  mfaSetupRequired: boolean;
+  totpEnabled: boolean;
+  /** The password was right and a two-factor code is due (an MFA token is held in memory only). */
+  mfaPending: boolean;
+  login(email: string, password: string): Promise<LoginResult>;
+  verifyMfa(proof: MfaProof): Promise<void>;
+  cancelMfa(): void;
+  /** A new session from the server (after a password change), or new account flags. */
+  update(s: SessionResponse | Partial<Pick<Session, 'totpEnabled' | 'mfaSetupRequired'>>): void;
   logout(reason?: 'expired' | 'manual'): void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
+type LoginResponse = SessionResponse | { mfaRequired: true; mfaToken: string };
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Session | null>(() => session.get());
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
 
+  const start = useCallback((s: SessionResponse) => {
+    session.set(s);
+    setState(session.get());
+  }, []);
+
   const logout = useCallback(
     (reason: 'expired' | 'manual' = 'manual') => {
-      const token = session.get()?.token;
-      if (!token && reason === 'expired') return; // parallel 401s: the first one already ended the session
+      const was = session.get();
+      if (!was && reason === 'expired') return; // parallel 401s: the first one already ended the session
       session.clear();
       setState(null);
+      setMfaToken(null);
       queryClient.clear(); // nothing of this user's data survives the session
-      if (token && reason === 'manual')
-        void fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => undefined); // the server revokes the token; the client has already forgotten it
+      if (was && reason === 'manual')
+        // the server revokes the token and clears the HttpOnly cookie; the page has already forgotten the user
+        void fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
       if (reason === 'expired')
         toast({ tone: 'info', title: 'Your session ended', body: 'Sign in again to continue.' });
     },
     [queryClient, toast],
   );
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api<{ token: string; expiresAt: number; user: SessionUser }>('/api/auth/login', {
-      method: 'POST',
-      body: { email, password },
-      auth: false,
-    });
-    const s = { token: res.token, expiresAt: res.expiresAt, user: res.user };
-    session.set(s);
-    setState(s);
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string): Promise<LoginResult> => {
+      const res = await api<LoginResponse>('/api/auth/login', {
+        method: 'POST',
+        body: { email, password },
+        auth: false,
+      });
+      if ('mfaRequired' in res) {
+        setMfaToken(res.mfaToken);
+        return 'mfa';
+      }
+      start(res);
+      return 'signed-in';
+    },
+    [start],
+  );
+
+  const verifyMfa = useCallback(
+    async (proof: MfaProof) => {
+      const res = await api<SessionResponse>('/api/auth/totp/verify', {
+        method: 'POST',
+        body: { mfaToken, ...proof },
+        auth: false,
+      });
+      setMfaToken(null);
+      start(res);
+    },
+    [mfaToken, start],
+  );
+
+  const update = useCallback<AuthState['update']>(
+    (s) => {
+      if ('user' in s && 'expiresAt' in s) return start(s);
+      const cur = session.get();
+      if (!cur) return;
+      start({ ...cur, ...s });
+    },
+    [start],
+  );
 
   // Any 401 on an authenticated call (expired, revoked, disabled) ends the session.
   useEffect(() => {
@@ -53,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
-  // Log out when the token expires, even if the user does nothing.
+  // Log out when the session expires, even if the user does nothing.
   useEffect(() => {
     if (!state) return;
     const ms = state.expiresAt * 1000 - Date.now();
@@ -61,25 +110,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [state, logout]);
 
-  // The server re-reads the role on every request: refresh it so a demotion shows up in the UI too.
+  // The server re-reads the role and the account state on every request: refresh them so a demotion, or a
+  // password an Admin reset, shows up in the UI too.
+  const key = sessionKey(state);
   useEffect(() => {
-    if (!state?.token) return;
+    if (!key) return;
     const ctrl = new AbortController();
-    api<{ user: SessionUser }>('/api/auth/me', { signal: ctrl.signal })
-      .then(({ user }) => {
-        if (user.role !== state.user.role || user.name !== state.user.name) {
-          const s = { ...state, user };
-          session.set(s);
-          setState(s);
-        }
+    api<{ user: SessionUser; mustChangePassword: boolean; totpEnabled: boolean; mfaSetupRequired: boolean }>(
+      '/api/auth/me',
+      { signal: ctrl.signal },
+    )
+      .then((me) => {
+        const cur = session.get();
+        if (!cur) return;
+        const next = { ...cur, ...me };
+        if (JSON.stringify(next) !== JSON.stringify(cur)) start(next);
       })
       .catch(() => undefined); // a 401 already logged out through the handler
     return () => ctrl.abort();
-  }, [state]);
+  }, [key, start]);
 
   const value = useMemo<AuthState>(
-    () => ({ user: state?.user ?? null, token: state?.token ?? null, login, logout }),
-    [state, login, logout],
+    () => ({
+      user: state?.user ?? null,
+      sessionKey: key,
+      mustChangePassword: !!state?.mustChangePassword,
+      mfaSetupRequired: !!state?.mfaSetupRequired,
+      totpEnabled: !!state?.totpEnabled,
+      mfaPending: mfaToken !== null,
+      login,
+      verifyMfa,
+      cancelMfa: () => setMfaToken(null),
+      update,
+      logout,
+    }),
+    [state, key, mfaToken, login, verifyMfa, update, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

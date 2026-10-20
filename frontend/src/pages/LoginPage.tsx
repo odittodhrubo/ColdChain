@@ -1,6 +1,7 @@
-import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, LogIn, ShieldCheck } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router';
+import { CodeField } from '../account/TwoFactor';
 import { useAuth } from '../auth/AuthProvider';
 import { Logo } from '../layout/Logo';
 import { ApiError } from '../lib/api';
@@ -31,11 +32,13 @@ function message(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Sign-in failed. Try again.';
   if (err.status === 0) return "Can't reach the ColdChain server. Check that the backend is running.";
   if (err.code === 'INVALID_CREDENTIALS') return 'Email or password is not correct.';
+  if (err.code === 'INVALID_CODE')
+    return 'That code is not right or was already used. Wait for the next one.';
   return err.message; // locked / rate limited: the server says when to retry
 }
 
 export function LoginPage() {
-  const { user, login } = useAuth();
+  const { user, login, mfaPending, verifyMfa, cancelMfa } = useAuth();
   const navigate = useNavigate();
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/';
   const [email, setEmail] = useState('');
@@ -43,6 +46,8 @@ export function LoginPage() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  const [recovery, setRecovery] = useState<string | null>(null); // null: use the app's code
 
   if (user) return <Navigate to={from} replace />;
 
@@ -51,17 +56,44 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim(), password);
-      navigate(from, { replace: true });
+      if ((await login(email.trim(), password)) === 'signed-in') navigate(from, { replace: true });
+      else {
+        setPassword(''); // the second step holds only a short-lived MFA token, never the password
+        setBusy(false);
+      }
     } catch (err) {
       setError(message(err));
       setBusy(false);
     }
   }
 
+  async function submitCode(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await verifyMfa(recovery !== null ? { recoveryCode: recovery.trim() } : { code });
+      navigate(from, { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'TOKEN_EXPIRED') {
+        cancelMfa();
+        setError('Sign-in timed out after 5 minutes. Enter your password again.');
+      } else setError(message(err));
+      setCode('');
+      setBusy(false);
+    }
+  }
+
+  const back = () => {
+    cancelMfa();
+    setError(null);
+    setCode('');
+    setRecovery(null);
+  };
+
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-      <section className="hidden flex-col justify-between border-r border-rule bg-panel-2 px-12 py-10 lg:flex">
+    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1fr)]">
+      <section className="hidden flex-col justify-between border-r border-rule bg-panel-2 px-10 py-10 lg:flex">
         <Logo />
         <div className="max-w-md">
           <p className="text-[1.9rem] leading-tight font-bold tracking-[-0.02em] text-ink text-balance">
@@ -95,71 +127,141 @@ export function LoginPage() {
 
       {/* top-anchored, so an error message grows the card downward instead of moving it */}
       <section className="flex items-start justify-center px-4 pt-12 pb-10 lg:pt-[22vh]">
-        <form
-          onSubmit={submit}
-          noValidate
-          aria-labelledby="login-title"
-          className="w-full max-w-sm rounded-[var(--radius-label)] border border-rule bg-panel p-6 shadow-[0_1px_2px_rgb(15_27_42/0.05)] sm:p-8"
-        >
-          <div className="mb-6 lg:hidden">
-            <Logo />
-          </div>
-          <h1 id="login-title" className="text-xl font-bold text-ink">
-            Sign in
-          </h1>
-          <p className="mt-1 text-sm text-ink-2">Use your ColdChain staff account.</p>
-
-          {error && (
-            <p
-              role="alert"
-              className="mt-5 rounded-md border border-breach/40 bg-breach-wash px-3 py-2.5 text-sm font-medium text-breach"
-            >
-              {error}
-            </p>
-          )}
-
-          <div className="mt-5 flex flex-col gap-4">
-            <Field
-              label="Email"
-              type="email"
-              name="email"
-              autoComplete="username"
-              inputMode="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <Field
-              label="Password"
-              type={show ? 'text' : 'password'}
-              name="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              trailing={
-                <button
-                  type="button"
-                  onClick={() => setShow((s) => !s)}
-                  aria-label={show ? 'Hide password' : 'Show password'}
-                  aria-pressed={show}
-                  className="mr-1 grid size-9 cursor-pointer place-items-center rounded-md text-ink-2 hover:bg-panel-2 hover:text-ink"
-                >
-                  {show ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
-                </button>
-              }
-            />
-          </div>
-          <Button
-            type="submit"
-            loading={busy}
-            disabled={!email || !password}
-            icon={<LogIn aria-hidden className="size-4" />}
-            className="mt-6 w-full"
+        {mfaPending ? (
+          <form
+            onSubmit={submitCode}
+            noValidate
+            aria-labelledby="login-title"
+            className="w-full max-w-md rounded-[var(--radius-label)] border border-rule bg-panel p-7 shadow-[0_1px_2px_rgb(15_27_42/0.05)] sm:p-10"
           >
-            {busy ? 'Signing in' : 'Sign in'}
-          </Button>
-        </form>
+            <div className="mb-6 lg:hidden">
+              <Logo />
+            </div>
+            <h1 id="login-title" className="text-xl font-bold text-ink">
+              Two-factor sign-in
+            </h1>
+            <p className="mt-1 text-sm text-ink-2">
+              {recovery !== null
+                ? 'Enter one of the recovery codes you saved. Each works once.'
+                : `Enter the 6-digit code from the authenticator app for ${email.trim()}.`}
+            </p>
+            {error && (
+              <p
+                role="alert"
+                className="mt-5 rounded-md border border-breach/40 bg-breach-wash px-3 py-2.5 text-sm font-medium text-breach"
+              >
+                {error}
+              </p>
+            )}
+            <div className="mt-5">
+              {recovery !== null ? (
+                <Field
+                  label="Recovery code"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="abcd-efgh-jkmn"
+                  value={recovery}
+                  onChange={(e) => setRecovery(e.target.value)}
+                />
+              ) : (
+                <CodeField label="Code" value={code} onChange={setCode} />
+              )}
+            </div>
+            <Button
+              type="submit"
+              loading={busy}
+              disabled={recovery !== null ? !recovery.trim() : code.length !== 6}
+              icon={<ShieldCheck aria-hidden className="size-4" />}
+              className="mt-6 w-full"
+            >
+              {busy ? 'Checking' : 'Verify and sign in'}
+            </Button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <Button variant="ghost" icon={<ArrowLeft aria-hidden className="size-4" />} onClick={back}>
+                Back
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setRecovery((r) => (r === null ? '' : null));
+                  setError(null);
+                }}
+              >
+                {recovery !== null ? 'Use the app code' : 'Use a recovery code'}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <form
+            onSubmit={submit}
+            noValidate
+            aria-labelledby="login-title"
+            className="w-full max-w-md rounded-[var(--radius-label)] border border-rule bg-panel p-7 shadow-[0_1px_2px_rgb(15_27_42/0.05)] sm:p-10"
+          >
+            <div className="mb-6 lg:hidden">
+              <Logo />
+            </div>
+            <h1 id="login-title" className="text-xl font-bold text-ink">
+              Sign in
+            </h1>
+            <p className="mt-1 text-sm text-ink-2">Use your ColdChain staff account.</p>
+
+            {error && (
+              <p
+                role="alert"
+                className="mt-5 rounded-md border border-breach/40 bg-breach-wash px-3 py-2.5 text-sm font-medium text-breach"
+              >
+                {error}
+              </p>
+            )}
+
+            <div className="mt-5 flex flex-col gap-4">
+              <Field
+                label="Email"
+                type="email"
+                name="email"
+                autoComplete="username"
+                inputMode="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Field
+                label="Password"
+                type={show ? 'text' : 'password'}
+                name="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                trailing={
+                  <button
+                    type="button"
+                    onClick={() => setShow((s) => !s)}
+                    aria-label={show ? 'Hide password' : 'Show password'}
+                    aria-pressed={show}
+                    className="mr-1 grid size-9 cursor-pointer place-items-center rounded-md text-ink-2 hover:bg-panel-2 hover:text-ink"
+                  >
+                    {show ? (
+                      <EyeOff aria-hidden className="size-4" />
+                    ) : (
+                      <Eye aria-hidden className="size-4" />
+                    )}
+                  </button>
+                }
+              />
+            </div>
+            <Button
+              type="submit"
+              loading={busy}
+              disabled={!email || !password}
+              icon={<LogIn aria-hidden className="size-4" />}
+              className="mt-6 w-full"
+            >
+              {busy ? 'Signing in' : 'Sign in'}
+            </Button>
+          </form>
+        )}
       </section>
     </div>
   );

@@ -112,3 +112,29 @@ def test_minutes_to_breach():
     assert minutes_to_breach(6.0, 10.0, 11.0) == 15.0
     assert minutes_to_breach(6.0, 7.0, 10.0) == 15.0  # the p90 path
     assert minutes_to_breach(5.0, 6.0, 7.0) is None
+
+
+def test_model_files_are_hash_checked_before_unpickling(tmp_path):
+    """S6: a joblib file is a pickle. One changed byte, or a card without hashes, and nothing is loaded."""
+    import json
+    import shutil
+
+    import pytest
+
+    from modeling.predict import MODEL_FILES, MODELS, verify_files
+
+    for name in (*MODEL_FILES, "model_card.json"):
+        shutil.copy(MODELS / name, tmp_path / name)
+    verify_files(tmp_path)  # the committed files match their card
+
+    data = bytearray((tmp_path / "health.joblib").read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    (tmp_path / "health.joblib").write_bytes(bytes(data))
+    with pytest.raises(ValueError, match="health.joblib does not match"):
+        verify_files(tmp_path)
+
+    card = json.loads((tmp_path / "model_card.json").read_text(encoding="utf-8"))
+    del card["files"]
+    (tmp_path / "model_card.json").write_text(json.dumps(card), encoding="utf-8")
+    with pytest.raises(ValueError, match="no sha256"):
+        verify_files(tmp_path)

@@ -1,1 +1,5 @@
+backend:backend-dev-only
+fridge-01:fridge-01-dev-only
+fridge-02:fridge-02-dev-only
 coldchain:coldchain-dev-only
+healthcheck:healthcheck-dev-only

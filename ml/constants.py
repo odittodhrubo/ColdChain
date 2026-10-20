@@ -19,6 +19,7 @@ NONCE_TTL_S = 120
 FORECAST_HORIZON_MIN = 30
 GAP_CONSERVATIVE_S = 15
 ENVELOPE_VERSION = 1
+CALIBRATION_MAX_C = 2.0
 
 TOPICS = {
     "telemetry": "{prefix}/{device_id}/telemetry",

@@ -13,7 +13,7 @@ export function DemoBanner() {
   return (
     <div
       role="note"
-      className="flex items-center justify-center gap-2 bg-demo px-4 py-1.5 text-sm font-semibold text-on-demo"
+      className="flex items-center justify-center gap-2 bg-demo px-4 py-1.5 text-sm font-semibold text-on-demo print:hidden"
     >
       <FlaskConical aria-hidden className="size-4" />
       <span className="sr-only sm:not-sr-only">DEMO MODE — heat exposure accelerated ×{data.demoScale}</span>

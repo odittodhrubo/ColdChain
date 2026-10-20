@@ -51,6 +51,10 @@ constexpr float BATT_DRAIN_PER_MIN = BATT_DRAIN_PCT_PER_MIN;
 constexpr float BATT_CHARGE_PER_MIN = 5.0f;
 constexpr float BATT_LOW_PCT = 20.0f;
 
+// ---- task watchdog (R6): the control loop must come round within this, or the chip resets. The loop never
+// blocks (millis()-based), so seconds of margin; the relay starts OFF and the 60 s min-off lock covers a reboot.
+constexpr uint32_t WDT_TIMEOUT_S = 8;
+
 // ---- offline sync (P05): stop-and-wait, one chunk in flight
 constexpr uint32_t SYNC_ACK_TIMEOUT_MS = 5000;  // resend the same chunk (fresh ts + nonce) after this
 constexpr uint32_t SYNC_MAX_RETRIES = 5;

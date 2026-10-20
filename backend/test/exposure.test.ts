@@ -287,6 +287,19 @@ describe('admin latch reset', () => {
     expect((await s.t.http().get(`/api/public/batch/${s.batch.public_token}`)).body.status).toBe('DISCARD');
   });
 
+  it('the fridge reads unlatched as soon as the reset returns, before the next telemetry', async () => {
+    const s = latchedFridge(() => ({ ack: true, event: true }));
+    // the device's last reading still says latched (its next one is up to 5 s away)
+    s.ctx.ingest.handle(topic('telemetry'), envelope('telemetry', telemetry(1, { latch: 1 })), NOW);
+    const auth = bearer(tokenFor(s.t, await addUser(s.t, 'ADMIN')));
+    const before = await s.t.http().get('/api/fridges/fridge-01').set(auth);
+    expect(before.body.fridge.latch).toBe(true);
+    expect((await reset(s)).status).toBe(200);
+    const after = await s.t.http().get('/api/fridges/fridge-01').set(auth);
+    expect(after.body.fridge.latch).toBe(false); // no stale red banner on the client's refetch
+    expect(after.body.fridge.live.latch).toBe(0);
+  });
+
   it('retries with a fresh command when the device does not answer, then succeeds', async () => {
     const s = latchedFridge((n) => (n === 1 ? {} : { ack: true, event: true }));
     const res = await reset(s);

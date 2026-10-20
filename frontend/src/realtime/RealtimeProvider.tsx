@@ -11,18 +11,20 @@ export interface SocketLike {
   on(event: string, fn: (...args: unknown[]) => void): unknown;
   disconnect(): unknown;
 }
-export type Connect = (token: string) => SocketLike;
+/** Opens the socket for one session (the key changes with every sign-in). */
+export type Connect = (sessionKey: string) => SocketLike;
 
-const defaultConnect: Connect = (token) =>
-  io({ auth: { token }, transports: ['websocket', 'polling'], reconnectionDelayMax: 10_000 });
+// The HttpOnly session cookie authenticates the handshake (same origin); no token is handed to the client.
+const defaultConnect: Connect = () =>
+  io({ withCredentials: true, transports: ['websocket', 'polling'], reconnectionDelayMax: 10_000 });
 
 export const POLL_MS = 5000;
 
 const RealtimeContext = createContext<Connection>('connecting');
 
 /**
- * One Socket.IO connection per signed-in session, authenticated with the JWT. It is opened again whenever the
- * token changes (re-login after expiry), so the UI never looks live while it is stale. While the socket is
+ * One Socket.IO connection per signed-in session, authenticated by the session cookie. It is opened again for
+ * every new session (re-login after expiry), so the UI never looks live while it is stale. While the socket is
  * down the data is refreshed every 5 s instead, and the top bar says so.
  */
 export function RealtimeProvider({
@@ -32,9 +34,9 @@ export function RealtimeProvider({
   children: ReactNode;
   connect?: Connect;
 }) {
-  const { token } = useAuth();
+  const { sessionKey: token } = useAuth(); // one connection per session
   const qc = useQueryClient();
-  // status belongs to one token: a new session starts at 'connecting' without a reset effect
+  // status belongs to one session: a new one starts at 'connecting' without a reset effect
   const [state, setState] = useState<{ token: string | null; status: Connection }>({
     token: null,
     status: 'connecting',
