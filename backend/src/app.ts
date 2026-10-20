@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -116,6 +118,15 @@ export function createApp(config: Config, db: Db) {
   app.use(router);
   app.locals.routes = routes; // the RBAC test iterates every registered route
   app.locals.ctx = ctx; // background jobs (index.ts) share the same services
+
+  const publicDir = process.env.PUBLIC_DIR ?? path.resolve(__dirname, '../public');
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next();
+      res.sendFile(path.join(publicDir, 'index.html'));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
