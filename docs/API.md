@@ -12,7 +12,7 @@ test suite fails when this file is stale.
   `alert:new`, `alert:update`, `prediction:update`, `relocation:update`, `security:event`,
   `device:status`, `device:cmdack`, `device:command`.
 
-54 routes.
+59 routes.
 
 ## health
 
@@ -120,6 +120,11 @@ test suite fails when this file is stale.
 |---|---|---|---|---|---|
 | GET | `/api/alerts` | `dashboard:read` (Admin, Pharmacist, Inspector, Display) |  | `status?`: `active` \| `acknowledged` \| `resolved` \| `all` = "all"<br>`severity?`: `INFO` \| `WARNING` \| `CRITICAL`<br>`type?`: `DOOR_OPEN_LONG` \| `FRIDGE_BREACH` \| `POWER_FAILURE` \| `BATTERY_LOW` \| `FRIDGE_OFFLINE` \| `BATCH_AT_RISK` \| `BATCH_DISCARD` \| `PREDICTED_BREACH` \| `COMPRESSOR_WEAK` \| `RELOCATION_PROPOSED` \| `FORECAST_DRIFT` \| `SECURITY_FLOOD`<br>`fridge_id?`: string ≤ 64 chars<br>`page?`: integer ≥ 1 = 1<br>`pageSize?`: integer 1..200 = 50 |  |
 | POST | `/api/alerts/:id/ack` | `alert:ack` (Admin, Pharmacist) | `id`: integer ≥ 0 (exclusive) |  |  |
+| GET | `/api/alerts/recipients` | `dashboard:read` (Admin, Pharmacist, Inspector, Display) |  |  |  |
+| POST | `/api/alerts/recipients` | `user:manage` (Admin) |  |  | `email`: email ≤ 255 chars<br>`set_active?`: boolean |
+| POST | `/api/alerts/recipients/:id/activate` | `user:manage` (Admin) | `id`: integer ≥ 0 (exclusive) |  |  |
+| DELETE | `/api/alerts/recipients/:id` | `user:manage` (Admin) | `id`: integer ≥ 0 (exclusive) |  |  |
+| POST | `/api/alerts/recipients/test` | `user:manage` (Admin) |  |  | `email?`: email |
 
 ## commands
 
