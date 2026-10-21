@@ -1,3 +1,4 @@
+import type { Db } from '../../db';
 import type { StoredEvent, StoredReading, RejectReason } from '../../mqtt/ingest';
 import { SAFE_MAX_C, SAFE_MIN_C } from '../../shared/constants';
 import { conflict, notFound } from '../../shared/errors';
@@ -6,6 +7,113 @@ import { logger } from '../../shared/logger';
 import type { BatchStatus } from '../../shared/status';
 import type { BatchView } from '../batches/service';
 import { type AlertMessage, Notifier } from './notifier';
+
+export interface AlertRecipient {
+  id: number;
+  email: string;
+  is_active: number;
+  created_at: number;
+  created_by: string | null;
+}
+
+export function getActiveRecipient(db: Db): string | null {
+  try {
+    const row = db
+      .prepare('SELECT email FROM alert_recipients WHERE is_active = 1 LIMIT 1')
+      .pluck()
+      .get() as string | undefined;
+    return row || null;
+  } catch {
+    return null;
+  }
+}
+
+export function listRecipients(db: Db): AlertRecipient[] {
+  try {
+    return db
+      .prepare(
+        'SELECT id, email, is_active, created_at, created_by FROM alert_recipients ORDER BY is_active DESC, id DESC',
+      )
+      .all() as AlertRecipient[];
+  } catch {
+    return [];
+  }
+}
+
+export function addRecipient(
+  db: Db,
+  email: string,
+  createdBy?: string,
+  setActive?: boolean,
+): AlertRecipient {
+  const normalized = email.trim().toLowerCase();
+  const now = Date.now();
+  const existing = db
+    .prepare('SELECT id, email, is_active, created_at, created_by FROM alert_recipients WHERE email = ?')
+    .get(normalized) as AlertRecipient | undefined;
+
+  if (existing) {
+    if (setActive) {
+      db.transaction(() => {
+        db.prepare('UPDATE alert_recipients SET is_active = 0').run();
+        db.prepare('UPDATE alert_recipients SET is_active = 1 WHERE id = ?').run(existing.id);
+      })();
+      return { ...existing, is_active: 1 };
+    }
+    return existing;
+  }
+
+  const count = db.prepare('SELECT COUNT(*) FROM alert_recipients').pluck().get() as number;
+  const shouldBeActive = setActive ?? count === 0;
+
+  return db.transaction(() => {
+    if (shouldBeActive) {
+      db.prepare('UPDATE alert_recipients SET is_active = 0').run();
+    }
+    const info = db
+      .prepare(
+        'INSERT INTO alert_recipients (email, is_active, created_at, created_by) VALUES (?, ?, ?, ?)',
+      )
+      .run(normalized, shouldBeActive ? 1 : 0, now, createdBy || null);
+    return {
+      id: Number(info.lastInsertRowid),
+      email: normalized,
+      is_active: shouldBeActive ? 1 : 0,
+      created_at: now,
+      created_by: createdBy || null,
+    };
+  })();
+}
+
+export function setActiveRecipient(db: Db, id: number): boolean {
+  return db.transaction(() => {
+    const target = db.prepare('SELECT id FROM alert_recipients WHERE id = ?').get(id);
+    if (!target) return false;
+    db.prepare('UPDATE alert_recipients SET is_active = 0').run();
+    db.prepare('UPDATE alert_recipients SET is_active = 1 WHERE id = ?').run(id);
+    return true;
+  })();
+}
+
+export function deleteRecipient(db: Db, id: number): boolean {
+  return db.transaction(() => {
+    const target = db.prepare('SELECT id, is_active FROM alert_recipients WHERE id = ?').get(id) as
+      | { id: number; is_active: number }
+      | undefined;
+    if (!target) return false;
+    db.prepare('DELETE FROM alert_recipients WHERE id = ?').run(id);
+    if (target.is_active === 1) {
+      const next = db
+        .prepare('SELECT id FROM alert_recipients ORDER BY id DESC LIMIT 1')
+        .pluck()
+        .get() as number | undefined;
+      if (next) {
+        db.prepare('UPDATE alert_recipients SET is_active = 1 WHERE id = ?').run(next);
+      }
+    }
+    return true;
+  })();
+}
 
 // Alert engine (P12). One alert per episode, keyed type|fridge|batch: raising an active key updates it (and only
 // escalates), never duplicates. Re-notification every 10 min (CRITICAL: 5 min) until acknowledged or resolved;
@@ -97,7 +205,9 @@ export class AlertEngine {
 
   constructor(
     private readonly ctx: AppContext,
-    readonly notifier = new Notifier(ctx.config),
+    readonly notifier = new Notifier(ctx.config, {
+      getAlertEmail: () => getActiveRecipient(ctx.db),
+    }),
   ) {
     const db = ctx.db;
     this.sql = {

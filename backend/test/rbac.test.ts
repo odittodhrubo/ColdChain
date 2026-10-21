@@ -9,6 +9,7 @@ import { addFridge, addUser, batchInput, bearer, makeApp, PASSWORD, tokenFor, ty
 import { proposedPlan } from './relocationHelpers';
 import { signMfaToken } from '../src/auth/tokens';
 import { base32Encode, hotp, newTotpSecret, totpStep } from '../src/auth/totp';
+import { addRecipient } from '../src/modules/alerts/service';
 
 const ctxOf = (t: TestApp) => t.app.locals.ctx as AppContext;
 /** A fridge with an active device (secret encrypted like the seed does). */
@@ -135,6 +136,21 @@ const EXAMPLES: Record<string, Example> = {
   }),
   'GET /api/alerts': async () => ({ path: '/api/alerts?status=active&severity=WARNING' }),
   'POST /api/alerts/:id/ack': async (t) => ({ path: `/api/alerts/${newAlert(t).id}/ack` }),
+  'GET /api/alerts/recipients': async () => ({}),
+  'POST /api/alerts/recipients': async () => ({
+    body: { email: `alert-${Math.random().toString(36).slice(2)}@coldchain.local` },
+  }),
+  'POST /api/alerts/recipients/:id/activate': async (t) => {
+    const row = addRecipient(t.db, `act-${Math.random().toString(36).slice(2)}@coldchain.local`);
+    return { path: `/api/alerts/recipients/${row.id}/activate` };
+  },
+  'DELETE /api/alerts/recipients/:id': async (t) => {
+    const row = addRecipient(t.db, `del-${Math.random().toString(36).slice(2)}@coldchain.local`);
+    return { path: `/api/alerts/recipients/${row.id}` };
+  },
+  'POST /api/alerts/recipients/test': async () => ({
+    body: { email: 'test@coldchain.local' },
+  }),
   'POST /api/fridges/:id/buzzer-test': async (t) => ({
     path: `/api/fridges/${fridgeWithDevice(t)}/buzzer-test`,
   }),

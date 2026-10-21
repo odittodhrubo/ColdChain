@@ -83,5 +83,15 @@ export async function seed(
     ).run(f.device, f.id, encryptSecret(secret, config.APP_SECRET_KEY), now);
     result.devices.push({ deviceId: f.device, secret, source: secret === fromEnv ? 'env' : 'generated' });
   }
+
+  if (config.ALERT_EMAIL_TO) {
+    const email = config.ALERT_EMAIL_TO.trim().toLowerCase();
+    const existing = db.prepare('SELECT 1 FROM alert_recipients WHERE email = ?').get(email);
+    if (!existing) {
+      db.prepare(
+        'INSERT OR IGNORE INTO alert_recipients (email, is_active, created_at, created_by) VALUES (?, 1, ?, ?)',
+      ).run(email, now, 'system (env)');
+    }
+  }
   return result;
 }

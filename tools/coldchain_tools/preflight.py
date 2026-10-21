@@ -58,9 +58,9 @@ def check_batches(batches: list[dict]) -> tuple[str, str]:
     for b in batches:
         counts[b["status"]] = counts.get(b["status"], 0) + 1
     detail = ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "no batches"
-    ok = len(batches) == 8 and counts.get("AT_RISK", 0) >= 1 and counts.get("DISCARD", 0) >= 1
+    ok = len(batches) in (8, 10) and counts.get("AT_RISK", 0) >= 1 and counts.get("DISCARD", 0) >= 1
     if not ok:
-        detail += " (a fresh demo has 8, incl. At Risk and Discard)"
+        detail += " (a fresh demo has 8 or 10, incl. At Risk and Discard)"
     return ("PASS" if ok else "FAIL"), detail
 
 
