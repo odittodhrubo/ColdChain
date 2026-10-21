@@ -28,6 +28,7 @@ export interface NotifierDeps {
   mailer?: Mailer | null; // null = email off
   retryDelaysMs?: number[]; // waits before the 2nd and 3rd try
   timeoutMs?: number;
+  getAlertEmail?: () => string | null;
 }
 
 /** Telegram legacy Markdown: escape the four markup characters in user data. */
@@ -45,18 +46,20 @@ export class Notifier {
   private readonly mailer: Mailer | null;
   private readonly delays: number[];
   private readonly timeoutMs: number;
+  private readonly deps: NotifierDeps;
 
   constructor(
     private readonly config: Config,
     deps: NotifierDeps = {},
   ) {
+    this.deps = deps;
     this.fetch = deps.fetch ?? fetch;
     this.delays = deps.retryDelaysMs ?? [1000, 3000];
     this.timeoutMs = deps.timeoutMs ?? 10_000;
     this.mailer =
       deps.mailer !== undefined
         ? deps.mailer
-        : config.SMTP_HOST && config.ALERT_EMAIL_TO
+        : config.SMTP_HOST
           ? nodemailer.createTransport({
               host: config.SMTP_HOST,
               port: config.SMTP_PORT ?? 587,
@@ -69,10 +72,14 @@ export class Notifier {
           : null;
   }
 
+  getActiveEmail(): string | null {
+    return this.deps.getAlertEmail?.() || this.config.ALERT_EMAIL_TO || null;
+  }
+
   get channels() {
     return {
       telegram: Boolean(this.config.TELEGRAM_BOT_TOKEN && this.config.TELEGRAM_CHAT_ID),
-      email: this.mailer !== null,
+      email: this.mailer !== null && Boolean(this.getActiveEmail()),
     };
   }
 
@@ -88,6 +95,34 @@ export class Notifier {
       this.channels.email ? this.retry('email', () => this.email(m)) : skipped(),
     ]);
     return { telegram, email };
+  }
+
+  async sendTestEmail(toEmail?: string): Promise<{ ok: boolean; recipient: string; error?: string }> {
+    const to = toEmail || this.getActiveEmail();
+    if (!to) {
+      return { ok: false, recipient: '', error: 'No recipient email configured. Please add an alert email first.' };
+    }
+    if (!this.mailer) {
+      return { ok: false, recipient: to, error: 'SMTP is not configured in .env (SMTP_HOST is missing)' };
+    }
+    try {
+      await this.mailer.sendMail({
+        from: this.config.SMTP_USER || 'coldchain@localhost',
+        to,
+        subject: '[ColdChain] Test Alert Notification',
+        text: [
+          'This is a test notification from your ColdChain Vaccine & Medicine Storage Monitor.',
+          '',
+          'Email alert delivery is working properly.',
+          'You will receive real-time warnings if a door remains open for > 60 seconds, or if temperature breaches 2–8 °C.',
+          '',
+          `Timestamp: ${new Date().toISOString()}`,
+        ].join('\n'),
+      });
+      return { ok: true, recipient: to };
+    } catch (err) {
+      return { ok: false, recipient: to, error: (err as Error).message };
+    }
   }
 
   private async telegram(m: AlertMessage) {
@@ -108,10 +143,12 @@ export class Notifier {
     if (!res.ok) throw new Error(`telegram HTTP ${res.status}`); // never echo the URL: it holds the bot token
   }
 
-  private async email(m: AlertMessage) {
+  private async email(m: AlertMessage, targetEmail?: string) {
+    const to = targetEmail || this.getActiveEmail();
+    if (!to) throw new Error('No recipient configured for email alert');
     await this.mailer!.sendMail({
       from: this.config.SMTP_USER || 'coldchain@localhost',
-      to: this.config.ALERT_EMAIL_TO!,
+      to,
       subject: `[ColdChain ${m.severity}] ${m.title}`,
       text: [...m.lines, ...(m.link ? ['', m.link] : [])].join('\n'),
     });

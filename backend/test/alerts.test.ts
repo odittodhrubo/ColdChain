@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type BatchInput, createBatch, refreshStatus } from '../src/modules/batches/service';
-import { AlertEngine, RENOTIFY_MS } from '../src/modules/alerts/service';
+import { AlertEngine, RENOTIFY_MS, addRecipient, getActiveRecipient } from '../src/modules/alerts/service';
 import { Notifier, telegramText } from '../src/modules/alerts/notifier';
 import { CommandTracker } from '../src/mqtt/commands';
 import { guarded } from '../src/jobs';
@@ -59,6 +59,24 @@ describe('door alarm', () => {
       in_app: { status: 'sent' },
       telegram: { status: 'sent', attempts: 1 },
       email: { status: 'skipped' },
+    });
+  });
+
+  it('sends an email alert to the active recipient in database when DOOR_ALARM occurs', async () => {
+    const s = setup();
+    const mailer = { sendMail: vi.fn(async () => ({})) };
+    addRecipient(s.t.db, 'mugdho78@gmail.com', 'admin', true);
+    const notifier = new Notifier(
+      { ...s.t.config, SMTP_HOST: 'smtp.gmail.com' },
+      { mailer, getAlertEmail: () => getActiveRecipient(s.t.db) },
+    );
+    s.ctx.alerts = new AlertEngine(s.ctx, notifier);
+    s.ingest.handle(topic('event'), envelope('event', { seq: 101, ts: nowS, type: 'DOOR_ALARM', data: {} }), NOW);
+    await flush();
+    expect(mailer.sendMail).toHaveBeenCalledTimes(1);
+    expect(mailer.sendMail.mock.calls[0][0]).toMatchObject({
+      to: 'mugdho78@gmail.com',
+      subject: expect.stringContaining('Door open for more than 60 s'),
     });
   });
 

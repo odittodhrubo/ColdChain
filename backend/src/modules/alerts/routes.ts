@@ -1,7 +1,16 @@
 import { z } from 'zod';
 import { conflict, notFound } from '../../shared/errors';
 import { defineRoute, type RouteDef } from '../../shared/http';
-import { ALERT_TYPES, alertView, type AlertRow } from './service';
+import {
+  ALERT_TYPES,
+  alertView,
+  type AlertRow,
+  listRecipients,
+  getActiveRecipient,
+  addRecipient,
+  setActiveRecipient,
+  deleteRecipient,
+} from './service';
 
 const int = z.coerce.number().int();
 
@@ -53,6 +62,82 @@ export function alertRoutes(): RouteDef[] {
       access: { permission: 'alert:ack' },
       params: z.strictObject({ id: int.positive() }),
       handler: ({ params, user }, ctx) => ({ alert: ctx.alerts.ack(params.id, user!.id) }),
+    }),
+
+    // Alert recipients: list, add, activate, delete, test email
+    defineRoute({
+      method: 'get',
+      path: '/api/alerts/recipients',
+      access: { permission: 'dashboard:read' },
+      handler(_req, { db, config }) {
+        const recipients = listRecipients(db);
+        const activeDb = getActiveRecipient(db);
+        const activeEmail = activeDb || config.ALERT_EMAIL_TO || null;
+        return {
+          recipients,
+          active_email: activeEmail,
+          smtp_configured: Boolean(config.SMTP_HOST),
+          smtp_host: config.SMTP_HOST || null,
+        };
+      },
+    }),
+
+    defineRoute({
+      method: 'post',
+      path: '/api/alerts/recipients',
+      access: { permission: 'user:manage' },
+      body: z.strictObject({
+        email: z.string().email().max(255),
+        set_active: z.boolean().optional(),
+      }),
+      handler({ body, user }, { db, config, audit }) {
+        const recipient = addRecipient(db, body.email, user?.email, body.set_active);
+        audit.append(user ? `user:${user.id}` : 'system', 'USER_UPDATED', { action: 'RECIPIENT_ADDED', email: recipient.email });
+        return {
+          recipient,
+          active_email: getActiveRecipient(db) || config.ALERT_EMAIL_TO || null,
+        };
+      },
+    }),
+
+    defineRoute({
+      method: 'post',
+      path: '/api/alerts/recipients/:id/activate',
+      access: { permission: 'user:manage' },
+      params: z.strictObject({ id: int.positive() }),
+      handler({ params, user }, { db, config, audit }) {
+        const ok = setActiveRecipient(db, params.id);
+        if (!ok) throw notFound('Recipient not found');
+        const active = getActiveRecipient(db);
+        audit.append(user ? `user:${user.id}` : 'system', 'USER_UPDATED', { action: 'RECIPIENT_ACTIVATED', id: params.id, active_email: active });
+        return { success: true, active_email: active || config.ALERT_EMAIL_TO || null };
+      },
+    }),
+
+    defineRoute({
+      method: 'delete',
+      path: '/api/alerts/recipients/:id',
+      access: { permission: 'user:manage' },
+      params: z.strictObject({ id: int.positive() }),
+      handler({ params, user }, { db, config, audit }) {
+        const ok = deleteRecipient(db, params.id);
+        if (!ok) throw notFound('Recipient not found');
+        audit.append(user ? `user:${user.id}` : 'system', 'USER_UPDATED', { action: 'RECIPIENT_DELETED', id: params.id });
+        return { success: true, active_email: getActiveRecipient(db) || config.ALERT_EMAIL_TO || null };
+      },
+    }),
+
+    defineRoute({
+      method: 'post',
+      path: '/api/alerts/recipients/test',
+      access: { permission: 'user:manage' },
+      body: z.strictObject({
+        email: z.string().email().optional(),
+      }),
+      handler: async ({ body }, { alerts }) => {
+        const result = await alerts.notifier.sendTestEmail(body.email);
+        return { result };
+      },
     }),
 
     // "Test buzzer": a signed BUZZER_TEST, tracked until the device's cmdack (poll GET /api/commands/:id).

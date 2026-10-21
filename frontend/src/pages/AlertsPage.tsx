@@ -15,6 +15,7 @@ import { Panel } from '../ui/Panel';
 import { Select } from '../ui/Select';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 import { useToast } from '../ui/Toast';
+import { AlertRecipientManager } from './AlertRecipientManager';
 
 const PAGE = PAGE_SIZE; // 15, like the other paged lists
 const TYPES = [
@@ -117,6 +118,7 @@ export function AlertsPage() {
   return (
     <>
       <PageHeader title={t('page.alerts.title')} subtitle={t('page.alerts.subtitle')} />
+      <AlertRecipientManager />
       <Panel bodyClassName="">
         <div className="flex flex-wrap items-end gap-3 border-b border-rule p-4">
           <Select label={t('al.fStatus')} hideLabel value={status} onChange={filter(setStatus)} className="w-40">
