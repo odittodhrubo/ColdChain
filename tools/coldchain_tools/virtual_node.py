@@ -316,6 +316,8 @@ class NodeRunner:
             self.transport.set_outage(bool(arg))
         else:
             apply_action(self.node, action, arg)
+            if action in ("temp", "hold", "eff"):
+                self.node._last_telemetry_ms = 0
 
     def act(self, action: str, arg=None) -> None:
         """A scenario action: door, power (toggle), wifi (outage on/off), eff, temp, ajar."""
@@ -325,6 +327,8 @@ class NodeRunner:
                 self.transport.set_outage(bool(arg))
             else:
                 apply_action(self.node, action, arg)
+                if action in ("temp", "hold", "eff"):
+                    self.node._last_telemetry_ms = 0
 
     def status(self) -> str:
         with self.lock:

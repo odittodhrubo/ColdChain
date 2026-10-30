@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
-import { setServerTime } from './time';
+import { serverNow, setServerTime } from './time';
 import type { Alert, BatchList, DeviceEvent, Fridge, FridgeList, ReadingRow } from './types';
 
 // One hook per server resource, on the query keys realtime/merge.ts updates.
@@ -49,7 +49,7 @@ export function useReadings(id: string, rangeS: number, bucket?: number) {
   return useQuery({
     queryKey: ['fridge', id, 'readings', rangeS],
     queryFn: ({ signal }) => {
-      const to = Math.floor(Date.now() / 1000);
+      const to = Math.floor(serverNow() / 1000) + 1;
       const qs = new URLSearchParams({ from: String(to - rangeS), to: String(to) });
       if (bucket) qs.set('bucket', String(bucket));
       return api<{ points: HistoryPoint[]; events: DeviceEvent[]; bucket: number }>(
@@ -57,7 +57,7 @@ export function useReadings(id: string, rangeS: number, bucket?: number) {
         { signal },
       );
     },
-    refetchInterval: 15_000, // history is not pushed; new buckets appear every 15 s
+    refetchInterval: 5_000, // history synced every 5 s matching telemetry cadence
   });
 }
 

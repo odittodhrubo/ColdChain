@@ -1,4 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
+import type { HistoryPoint } from '../lib/queries';
+import type { DeviceEvent, ReadingRow } from '../lib/types';
 
 // Server push -> query cache. One place decides how each Socket.IO event changes the data pages already hold,
 // so a page never subscribes to the socket itself (no duplicate listeners, no double updates).
@@ -70,7 +72,23 @@ function patchList<K extends string, T extends WithId>(
 export function applyRealtimeEvent(qc: QueryClient, event: string, data: unknown) {
   switch (event) {
     case 'fridge:update': {
-      const live = data as { fridge_id: string };
+      const live = data as {
+        fridge_id: string;
+        device_id?: string;
+        seq?: number;
+        ts?: number;
+        temp?: number | null;
+        ambient?: number | null;
+        door?: 0 | 1;
+        comp?: 0 | 1;
+        power?: 'MAINS' | 'BATTERY';
+        batt?: number;
+        state?: 'SAFE' | 'WARNING' | 'BREACH';
+        exp_s?: number;
+        latch?: 0 | 1;
+        mode?: 'model' | 'manual';
+        last_seen?: number;
+      };
       patchList<'fridges', WithId & { live?: object | null }>(
         qc,
         'fridges',
@@ -81,9 +99,73 @@ export function applyRealtimeEvent(qc: QueryClient, event: string, data: unknown
           live: { ...(f.live ?? {}), ...live },
         }),
       );
-      qc.setQueryData<{ fridge: { live?: object | null } }>(['fridge', live.fridge_id], (old) =>
-        old ? { ...old, fridge: { ...old.fridge, live: { ...(old.fridge.live ?? {}), ...live } } } : old,
+      qc.setQueryData<{ fridge: { live?: object | null }; readings?: ReadingRow[] }>(
+        ['fridge', live.fridge_id],
+        (old) => {
+          if (!old) return old;
+          let readings = old.readings;
+          if (readings && live.temp !== undefined && live.temp !== null && live.ts && live.seq) {
+            if (!readings.some((r) => r.seq === live.seq)) {
+              const newRow: ReadingRow = {
+                seq: live.seq,
+                ts: live.ts,
+                temp: live.temp,
+                door: live.door ?? 0,
+                comp: live.comp ?? 0,
+                power: live.power ?? 'MAINS',
+                batt: live.batt ?? 100,
+                state: live.state ?? 'SAFE',
+                late: 0,
+                received_at: live.last_seen ?? Date.now(),
+              };
+              readings = [newRow, ...readings].slice(0, 100);
+            }
+          }
+          return {
+            ...old,
+            fridge: { ...old.fridge, live: { ...(old.fridge.live ?? {}), ...live } },
+            readings,
+          };
+        },
       );
+      if (live.temp !== undefined && live.temp !== null && live.ts) {
+        qc.setQueriesData<{ points: HistoryPoint[]; events: DeviceEvent[]; bucket: number }>(
+          { queryKey: ['fridge', live.fridge_id, 'readings'] },
+          (old) => {
+            if (!old || !Array.isArray(old.points)) return old;
+            const bucket = old.bucket || 5;
+            const bucketTs = Math.floor(live.ts! / bucket) * bucket;
+            const points = [...old.points];
+            const lastIdx = points.length - 1;
+            const newPt: HistoryPoint = {
+              ts: bucketTs,
+              temp: live.temp!,
+              min: live.temp!,
+              max: live.temp!,
+              door: live.door ?? 0,
+              comp: live.comp ?? 0,
+              battery: live.power === 'BATTERY' ? 1 : 0,
+              late: 0,
+            };
+            if (lastIdx >= 0 && points[lastIdx].ts === bucketTs) {
+              points[lastIdx] = {
+                ...points[lastIdx],
+                temp: live.temp!,
+                min: Math.min(points[lastIdx].min ?? live.temp!, live.temp!),
+                max: Math.max(points[lastIdx].max ?? live.temp!, live.temp!),
+                door: live.door ?? points[lastIdx].door,
+                comp: live.comp ?? points[lastIdx].comp,
+                battery: live.power === 'BATTERY' ? 1 : points[lastIdx].battery,
+              };
+            } else if (lastIdx >= 0 && points[lastIdx].ts < bucketTs) {
+              points.push(newPt);
+            } else if (lastIdx < 0) {
+              points.push(newPt);
+            }
+            return { ...old, points };
+          },
+        );
+      }
       break;
     }
     case 'fridge:latch': {
