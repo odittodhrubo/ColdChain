@@ -209,7 +209,7 @@ export function FridgeCard({ fridge, now }: { fridge: Fridge; now: number }) {
       </div>
 
       <div className="mt-auto border-t border-rule px-4 pt-2 pb-3">
-        <Sparkline fridgeId={fridge.id} ink={meta.ink} />
+        <Sparkline fridgeId={fridge.id} ink={meta.ink} live={live} />
         <ForecastChip p={prediction} now={now} />
       </div>
     </article>

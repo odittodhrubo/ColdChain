@@ -52,7 +52,7 @@ import { PageHeader } from '../layout/AppShell';
 import { CALIBRATION_MAX_C, DOUBLE_ABOVE_C, SAFE_MAX_C, SAFE_MIN_C } from '../lib/constants';
 import { useFridge, useReadings, type HistoryPoint } from '../lib/queries';
 import { serverNow, useServerNow } from '../lib/time';
-import type { DeviceEvent, Prediction, ReadingRow } from '../lib/types';
+import type { DeviceEvent, LiveState, Prediction, ReadingRow } from '../lib/types';
 import { Panel } from '../ui/Panel';
 import { EmptyState, ErrorState, Skeleton } from '../ui/States';
 import { Pager, usePaged } from '../ui/Pager';
@@ -177,7 +177,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: { paylo
   );
 }
 
-function HistoryChart({ fridgeId }: { fridgeId: string }) {
+function HistoryChart({ fridgeId, live }: { fridgeId: string; live?: LiveState | null }) {
   const { t } = useT();
   const rangeLabel = (key: string) => t(`fd.range${key}` as StringKey);
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[1]);
@@ -186,7 +186,50 @@ function HistoryChart({ fridgeId }: { fridgeId: string }) {
     range.s,
     'bucket' in range ? range.bucket : undefined,
   );
-  const points = useMemo(() => data?.points ?? [], [data]);
+  const points = useMemo(() => {
+    const raw = data?.points ? [...data.points] : [];
+    if (!live || live.temp === null || live.temp === undefined || !live.ts) return raw;
+    const bucket = data?.bucket ?? ('bucket' in range ? range.bucket : 5);
+    const liveTs = Math.floor(live.ts / bucket) * bucket;
+    if (raw.length === 0) {
+      return [
+        {
+          ts: liveTs,
+          temp: live.temp,
+          min: live.temp,
+          max: live.temp,
+          door: live.door ?? 0,
+          comp: live.comp ?? 0,
+          battery: live.power === 'BATTERY' ? 1 : 0,
+          late: 0,
+        },
+      ];
+    }
+    const last = raw[raw.length - 1];
+    if (liveTs > last.ts) {
+      raw.push({
+        ts: liveTs,
+        temp: live.temp,
+        min: live.temp,
+        max: live.temp,
+        door: live.door ?? 0,
+        comp: live.comp ?? 0,
+        battery: live.power === 'BATTERY' ? 1 : 0,
+        late: 0,
+      });
+    } else {
+      raw[raw.length - 1] = {
+        ...last,
+        temp: live.temp,
+        min: Math.min(last.min ?? live.temp, live.temp),
+        max: Math.max(last.max ?? live.temp, live.temp),
+        door: live.door ?? last.door,
+        comp: live.comp ?? last.comp,
+        battery: live.power === 'BATTERY' ? 1 : last.battery,
+      };
+    }
+    return raw;
+  }, [data, range, live]);
   const prediction = usePrediction(fridgeId).data?.latest;
   const fc = useMemo(() => forecastPoints(points, prediction, serverNow()), [points, prediction]);
   const chartData: ChartPoint[] = useMemo(() => [...points, ...fc], [points, fc]);
@@ -803,7 +846,7 @@ export function FridgeDetailPage() {
           <AiPanel fridgeId={fridge.id} now={now} />
         </div>
         <div className="flex min-w-0 flex-col gap-5">
-          <HistoryChart fridgeId={fridge.id} />
+          <HistoryChart fridgeId={fridge.id} live={fridge.live} />
           <BudgetPanel fridge={fridge} now={now} />
           <div className="grid gap-5 2xl:grid-cols-2">
             <EventsPanel events={events} />

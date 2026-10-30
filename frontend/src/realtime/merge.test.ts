@@ -14,7 +14,12 @@ describe('socket events merge into the query cache', () => {
       ],
     });
     qc.setQueryData(['fridge', 'fridge-01'], { fridge: { id: 'fridge-01', live: { temp: 4.1, door: 0 } } });
-    applyRealtimeEvent(qc, 'fridge:update', { fridge_id: 'fridge-01', temp: 9.2, door: 1 });
+    qc.setQueryData(['fridge', 'fridge-01', 'readings', 3600], {
+      points: [{ ts: 100, temp: 4.1, min: 4.1, max: 4.1, door: 0, comp: 0, battery: 0, late: 0 }],
+      events: [],
+      bucket: 10,
+    });
+    applyRealtimeEvent(qc, 'fridge:update', { fridge_id: 'fridge-01', temp: 9.2, door: 1, ts: 110, seq: 2 });
     const list = qc.getQueryData<{ fridges: { id: string; live: Record<string, unknown> | null }[] }>([
       'fridges',
     ])!;
@@ -25,6 +30,14 @@ describe('socket events merge into the query cache', () => {
         temp: 9.2,
       },
     );
+    const readings = qc.getQueryData<{ points: { ts: number; temp: number }[] }>([
+      'fridge',
+      'fridge-01',
+      'readings',
+      3600,
+    ])!;
+    expect(readings.points).toHaveLength(2);
+    expect(readings.points[1].temp).toBe(9.2);
   });
 
   it('batch:update replaces a known batch in every list and detail, removes a deleted one', () => {

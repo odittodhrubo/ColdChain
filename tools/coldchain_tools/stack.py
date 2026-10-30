@@ -281,7 +281,7 @@ class Stack:
             )
         return self.seeded
 
-    def up(self, hours: float = 6, ui: bool = False, weak: dict[str, float] | None = None) -> Stack:
+    def up(self, hours: float = 24, ui: bool = False, weak: dict[str, float] | None = None) -> Stack:
         if self.acl and reachable(self.mqtt_url):
             raise SystemExit(
                 f"acl=True starts its own broker, but something already listens on {self.mqtt_url}"
@@ -440,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="reset + seed + run everything")
-    d.add_argument("--hours", type=float, default=6, help="seeded history (default 6)")
+    d.add_argument("--hours", type=float, default=24, help="seeded history (default 24)")
     d.add_argument("--no-ui", action="store_true")
     d.add_argument("--no-nodes", action="store_true", help="do not start virtual nodes")
     d.add_argument("--mqtt", help="broker URL (default MQTT_URL from .env; a local one is started if needed)")
