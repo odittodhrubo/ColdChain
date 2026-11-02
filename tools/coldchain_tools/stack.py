@@ -208,9 +208,10 @@ class Stack:
         )
         if self.web_port:
             e["CORS_ORIGIN"] = f"http://localhost:{self.web_port}"
-            # QR codes and public links a phone scans must point at this machine, not the phone's localhost
-            e["PUBLIC_BASE_URL"] = f"http://{lan_ip()}:{self.web_port}"
+            # Respect configured PUBLIC_BASE_URL from .env (e.g. localhost) so links match where the user opens the app
+            e["PUBLIC_BASE_URL"] = setting("PUBLIC_BASE_URL", f"http://localhost:{self.web_port}")
         return e
+
 
     @property
     def _local_broker(self) -> bool:
@@ -256,8 +257,9 @@ class Stack:
         elif name == "web":
             env = {**self.env(), "VITE_PROXY_TARGET": self.api}
             self.spawn(
-                "web", [npx(), "vite", "--port", str(self.web_port), "--strictPort"], ROOT / "frontend", env
+                "web", [npx(), "vite", "--host", "--port", str(self.web_port), "--strictPort"], ROOT / "frontend", env
             )
+
             self.wait("web", lambda: reachable(f"http://127.0.0.1:{self.web_port}"))
 
     def stop(self, name: str) -> None:

@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "Wokwi.wokwi-vscode",
+    "platformio.platformio-ide",
+    "AykutSarac.jsoncrack-vscode",
+    "bierner.markdown-mermaid",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "charliermarsh.ruff"
+  ]
+}

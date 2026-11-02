@@ -52,8 +52,9 @@ describe('door alarm', () => {
     expect(body.text).toContain('Door open for more than 60 s');
     expect(body.text).toContain('Fridge: fridge-01 (fridge-01)');
     expect(body.text).toContain('Temperature: 6.4 °C');
-    expect(body.text).toContain('[Open dashboard](http://localhost:5173/fridges/fridge-01)');
+    expect(body.text).toContain('[Open dashboard](http://127.0.0.1:5173/fridges/fridge-01)');
     expect(body.text).not.toContain(TOKEN); // secrets never go into notification text
+
     const delivery = JSON.parse(s.alerts()[0].delivery_status);
     expect(delivery).toMatchObject({
       in_app: { status: 'sent' },

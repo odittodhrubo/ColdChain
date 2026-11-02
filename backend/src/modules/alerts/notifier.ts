@@ -37,9 +37,15 @@ const md = (s: string) => s.replace(/([_*`[])/g, '\\$1');
 export function telegramText(m: AlertMessage): string {
   const icon = m.severity === 'CRITICAL' ? '🔴' : m.severity === 'WARNING' ? '🟠' : 'ℹ️';
   const body = [`${icon} *${md(m.title)}*`, ...m.lines.map(md)];
-  if (m.link) body.push(`[Open dashboard](${m.link})`);
+  if (m.link) {
+    // Telegram Markdown strips [text](http://localhost:...) links because localhost is not an IP or FQDN.
+    // Converting localhost to 127.0.0.1 ensures Telegram creates a clickable inline text_link.
+    const link = m.link.replace('://localhost', '://127.0.0.1');
+    body.push(`[Open dashboard](${link})`);
+  }
   return body.join('\n');
 }
+
 
 export class Notifier {
   private readonly fetch: Fetch;
